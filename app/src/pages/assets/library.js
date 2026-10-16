@@ -49,7 +49,9 @@
 
   // ---------- navigation ----------
   function route() {
-    const [s, focus] = location.hash.slice(1).split('/');
+    const [path, query] = location.hash.slice(1).split('?');
+    const [s, focus] = path.split('/');
+    const q = new URLSearchParams(query || '').get('q') || '';
     section = ['history', 'bookmarks', 'downloads'].includes(s) ? s : 'history';
     for (const sec of document.querySelectorAll('.lib-section')) sec.hidden = sec.id !== section;
     for (const a of document.querySelectorAll('.side a')) a.classList.toggle('current', a.dataset.s === section);
@@ -57,7 +59,7 @@
     $('heading').textContent = name;
     document.title = name;
     $('filter').placeholder = `Search ${name.toLowerCase()}`;
-    $('filter').value = '';
+    $('filter').value = q;
     if (section === 'history') loadHistory(true);
     if (section === 'bookmarks') loadBookmarks(decodeURIComponent(focus || ''));
     if (section === 'downloads') loadDownloads();

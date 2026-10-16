@@ -11,6 +11,7 @@
     history: '<svg viewBox="0 0 20 20"><path d="M3.5 10a6.5 6.5 0 1 0 2-4.7"/><path d="M3.5 3.5v3h3"/><path d="M10 6.5V10l2.5 1.6"/></svg>',
     bookmark: '<svg viewBox="0 0 20 20"><path d="m10 3 2.1 4.4 4.8.6-3.5 3.3.9 4.7L10 13.7 5.7 16l.9-4.7L3.1 8l4.8-.6z"/></svg>',
     ai: '<svg viewBox="0 0 20 20"><path d="M10 2.5l1.6 4.4 4.4 1.6-4.4 1.6L10 14.5l-1.6-4.4L4 8.5l4.4-1.6z"/></svg>',
+    bang: '<svg viewBox="0 0 20 20"><path d="M10 3.5v8.5M10 15.5v.5"/></svg>',
   };
 
   function el(tag, cls, text) {
@@ -41,12 +42,13 @@
       const ic = el('span', 'ic');
       ic.innerHTML = ICON[item.type] || ICON.search;
       row.append(ic);
-      const plain = item.type === 'tab' || item.type === 'ai' || item.type === 'history' || item.type === 'bookmark' || (item.type === 'url' && item.sub);
+      const plain = item.type === 'tab' || item.type === 'ai' || item.type === 'history' || item.type === 'bookmark' || item.type === 'bang' || (item.type === 'url' && item.sub);
       const t = plain ? el('span', 'text', item.text) : textWithCompletion(item.text, query || '');
       if (item.sub && item.type !== 'tab' && item.type !== 'ai') t.append(el('span', 'sub link', '— ' + item.sub));
       if (item.type === 'search' && item.typed) t.append(el('span', 'sub', '— Search'));
       row.append(t);
       if (item.type === 'tab') row.append(el('span', 'tag', 'Switch to this tab'));
+      if (item.type === 'bang') { row.classList.add('bang'); row.append(el('span', 'tag', '!' + item.trigger)); }
       if (item.type === 'ai') { row.classList.add('ai'); row.append(el('span', 'tag', item.sub || 'Ask AI')); }
       if (item.type === 'recent') {
         const x = el('span', 'x');

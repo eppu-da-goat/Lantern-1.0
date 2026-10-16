@@ -48,6 +48,21 @@ const DEFAULT_SETTINGS = {
   mailService: 'gmail',
   mailUrl: '',
   customAccent: '',
+  // 1.6
+  bangs: true,
+  customBangs: [],
+  tabLayout: 'horizontal',
+  tabSide: 'left',
+  tabsCollapsed: false,
+  tabsWidth: 220,
+  compactMode: false,
+  mruTabSwitching: false,
+  showSplitButton: true,
+  fingerprinting: 'standard',
+  siteShields: {},
+  apps: [],
+  stripTracking: true,
+  hideAdElements: true,
 };
 
 const ENGINES = {

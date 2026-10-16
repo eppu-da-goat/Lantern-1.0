@@ -440,3 +440,160 @@
     else markCurrent('you');
   });
 })();
+
+
+// ---------- 1.6: bangs, services, shields, import, apps ----------
+(() => {
+  const api = window.lantern;
+  if (!api) return;
+  const $ = (id) => document.getElementById(id);
+  const make = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; };
+  let settings = {};
+  const refreshSettings = async () => { settings = (await api.info()).settings; };
+
+  // ----- bangs -----
+  async function renderMyBangs() {
+    const list = $('mybangs');
+    list.dataset.empty = 'None yet.';
+    list.textContent = '';
+    for (const b of settings.customBangs || []) {
+      const li = make('li');
+      li.append(make('code', '', `!${b.trigger}`), make('span', 'grow', `${b.name} — ${b.url}`));
+      const del = make('button', 'btn', 'Remove');
+      del.type = 'button';
+      del.addEventListener('click', async () => {
+        settings = await api.setSetting('customBangs', (settings.customBangs || []).filter((x) => x.trigger !== b.trigger));
+        renderMyBangs();
+      });
+      li.append(del);
+      list.append(li);
+    }
+  }
+  $('bang-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const trigger = $('bang-trigger').value.trim().replace(/^!/, '');
+    const next = [...(settings.customBangs || []).filter((x) => x.trigger !== trigger.toLowerCase()), { trigger, name: $('bang-name').value.trim(), url: $('bang-url').value.trim() }];
+    try {
+      settings = await api.setSetting('customBangs', next);
+      $('bang-msg').textContent = `Added !${trigger.toLowerCase()}`;
+      $('bang-trigger').value = ''; $('bang-name').value = ''; $('bang-url').value = '';
+      renderMyBangs();
+    } catch (err) {
+      $('bang-msg').textContent = String(err.message || err).replace(/^.*Invalid setting: /, '');
+    }
+  });
+  let allBangs = [];
+  function renderBangList() {
+    const q = $('bang-filter').value.trim().toLowerCase().replace(/^!/, '');
+    const list = $('bang-list');
+    list.textContent = '';
+    for (const b of allBangs) {
+      if (q && !b.name.toLowerCase().includes(q) && !b.triggers.some((t) => t.startsWith(q))) continue;
+      const li = make('li');
+      li.append(make('code', '', b.triggers.map((t) => `!${t}`).join(' ')), make('span', '', b.name));
+      list.append(li);
+    }
+  }
+  $('bang-filter').addEventListener('input', renderBangList);
+
+  // ----- services, DNS, annoyances -----
+  const time = (ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  async function renderServices() {
+    const sv = await api.services();
+    $('svc-trackers').checked = !!sv.trackerLists;
+    $('svc-threats').checked = !!sv.threatLists;
+    $('svc-annoy').checked = sv.blockAnnoyances !== false;
+    $('svc-dns').value = sv.secureDns || 'automatic';
+    $('dns-custom-row').hidden = sv.secureDns !== 'custom';
+    $('dns-custom').value = sv.secureDnsUrl || '';
+    const log = $('svc-log');
+    log.textContent = '';
+    if (!sv.log.length) log.append(make('li', 'empty', `No requests of its own since Lantern started at ${time(sv.startedAt)}.`));
+    for (const r of sv.log) { const li = make('li'); li.append(make('span', '', time(r.at)), make('span', '', r.service), make('span', '', r.host)); log.append(li); }
+    $('svc-summary').textContent = `Lantern has made ${sv.log.length} request${sv.log.length === 1 ? '' : 's'} of its own since ${time(sv.startedAt)}. The sites you visit aren't listed here.`;
+  }
+  const svc = (key, getValue) => async () => { try { await api.setService(key, getValue()); } catch (err) { alert(String(err.message || err).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')); } renderServices(); };
+  $('svc-trackers').addEventListener('change', svc('trackerLists', () => $('svc-trackers').checked));
+  $('svc-threats').addEventListener('change', svc('threatLists', () => $('svc-threats').checked));
+  $('svc-annoy').addEventListener('change', svc('blockAnnoyances', () => $('svc-annoy').checked));
+  $('svc-dns').addEventListener('change', () => { $('dns-custom-row').hidden = $('svc-dns').value !== 'custom'; if ($('svc-dns').value !== 'custom' || $('dns-custom').value) svc('secureDns', () => $('svc-dns').value)(); });
+  $('dns-save').addEventListener('click', async () => { await svc('secureDnsUrl', () => $('dns-custom').value)(); await svc('secureDns', () => 'custom')(); });
+  $('svc-refresh').addEventListener('click', renderServices);
+
+  // ----- per-site shields -----
+  function renderShields() {
+    const list = $('shields-list');
+    list.dataset.empty = 'No exceptions. Shields are up everywhere.';
+    list.textContent = '';
+    for (const [site, c] of Object.entries(settings.siteShields || {})) {
+      const what = c.off ? 'Shields down' : [c.fp === false ? 'fingerprinting allowed' : '', c.cookies === false ? 'third-party cookies allowed' : ''].filter(Boolean).join(', ');
+      const li = make('li');
+      li.append(make('span', 'grow', `${site} — ${what}`));
+      const b = make('button', 'btn', 'Reset');
+      b.type = 'button';
+      b.addEventListener('click', async () => { settings.siteShields = await api.resetShields(site); renderShields(); });
+      li.append(b);
+      list.append(li);
+    }
+  }
+  $('shields-reset-all').addEventListener('click', async () => { settings.siteShields = await api.resetShields(''); renderShields(); });
+
+  // ----- import -----
+  async function renderImport() {
+    const sel = $('import-source');
+    const sources = await api.importSources();
+    sel.textContent = '';
+    if (!sources.length) { sel.append(make('option', '', 'No other browsers found on this computer')); $('import-go').disabled = true; return; }
+    for (const s of sources) { const o = make('option', '', `${s.browser}${s.profile ? ` — ${s.profile}` : ''}`); o.value = s.id; sel.append(o); }
+    $('import-go').disabled = false;
+  }
+  $('import-go').addEventListener('click', async () => {
+    const msg = $('import-msg');
+    msg.textContent = 'Importing…';
+    try {
+      const r = await api.importBrowser($('import-source').value, { bookmarks: $('import-bm').checked, history: $('import-hist').checked });
+      msg.textContent = `Imported ${r.bookmarks} new bookmark${r.bookmarks === 1 ? '' : 's'} and ${r.history} new history entr${r.history === 1 ? 'y' : 'ies'} (found ${r.found.bookmarks} and ${r.found.history}).`;
+    } catch (err) {
+      msg.textContent = String(err.message || err).replace(/^Error invoking remote method '[^']+': (Error: )?/, '') + ' If that browser is open, quit it and try again.';
+    }
+  });
+  $('import-html').addEventListener('click', async () => {
+    const r = await api.importHtml();
+    if (r) $('import-msg').textContent = `Imported ${r.bookmarks} new bookmark${r.bookmarks === 1 ? '' : 's'} from ${r.file} (it had ${r.found}).`;
+  });
+  $('export-html').addEventListener('click', async () => {
+    const r = await api.exportHtml();
+    if (r) $('import-msg').textContent = `Exported ${r.count} bookmarks to ${r.file}.`;
+  });
+
+  // ----- apps -----
+  async function renderApps() {
+    const list = $('apps-list');
+    list.dataset.empty = 'No apps installed.';
+    list.textContent = '';
+    for (const a of await api.apps()) {
+      const li = make('li');
+      if (a.icon) { const img = make('img'); img.src = a.icon; img.alt = ''; li.append(img); }
+      li.append(make('span', 'grow', `${a.name} — ${a.url}`));
+      const open = make('button', 'btn', 'Open');
+      open.type = 'button';
+      open.addEventListener('click', () => api.openApp(a.id));
+      const del = make('button', 'btn', 'Remove');
+      del.type = 'button';
+      del.addEventListener('click', async () => { await api.removeApp(a.id); renderApps(); });
+      li.append(open, del);
+      list.append(li);
+    }
+  }
+
+  (async () => {
+    await refreshSettings();
+    renderMyBangs();
+    renderShields();
+    try { allBangs = await api.bangsList(); renderBangList(); } catch {}
+    renderServices();
+    renderImport().catch(() => {});
+    renderApps();
+    setInterval(() => { if (!document.hidden) { renderServices(); } }, 5000);
+  })();
+})();

@@ -23,10 +23,12 @@
       <a href="#privacy" data-s="privacy"><svg viewBox="0 0 20 20"><path d="M10 2.5 4 5v4.5c0 3.8 2.6 6.9 6 8 3.4-1.1 6-4.2 6-8V5z"/></svg>Privacy and security</a>
       <a href="#ai" data-s="ai"><svg viewBox="0 0 20 20"><path d="M10 2.5l1.6 4.4 4.4 1.6-4.4 1.6L10 14.5l-1.6-4.4L4 8.5l4.4-1.6z"/></svg>AI assistant</a>
       <a href="#search" data-s="search"><svg viewBox="0 0 20 20"><circle cx="8.5" cy="8.5" r="5"/><path d="m12.5 12.5 4 4"/></svg>Search engine</a>
+      <a href="#tabs" data-s="tabs"><svg viewBox="0 0 20 20"><rect x="3" y="4" width="14" height="12" rx="2"/><path d="M8 4v12"/></svg>Tabs and layout</a>
       <a href="#appearance" data-s="appearance"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="6.5"/><path d="M10 3.5v13a6.5 6.5 0 0 0 0-13z" fill="currentColor"/></svg>Appearance</a>
       <a href="#startup" data-s="startup"><svg viewBox="0 0 20 20"><path d="M10 3v7M5.6 5.6a6.5 6.5 0 1 0 8.8 0"/></svg>On startup</a>
       <a href="#performance" data-s="performance"><svg viewBox="0 0 20 20"><path d="M11 2.5 4.5 11H10l-1 6.5L15.5 9H10z"/></svg>Performance</a>
       <a href="#extensions" data-s="extensions"><svg viewBox="0 0 20 20"><path d="M8 3.5h3v2a1.5 1.5 0 1 0 3 0v-2h2.5v4h-2a1.5 1.5 0 1 0 0 3h2v6H12v-2a1.5 1.5 0 1 0-3 0v2H3.5V11h2a1.5 1.5 0 1 0 0-3h-2V3.5H8z"/></svg>Extensions</a>
+      <a href="#import" data-s="import"><svg viewBox="0 0 20 20"><path d="M10 3.5v9M6 9l4 4 4-4M4 16.5h12"/></svg>Import and apps</a>
       <a href="#downloads" data-s="downloads"><svg viewBox="0 0 20 20"><path d="M10 3.5v9M6 9l4 4 4-4M4.5 16h11"/></svg>Downloads</a>
       <a href="#about" data-s="about"><svg viewBox="0 0 20 20"><path d="M7.5 3h5M7 5h6l-.6 10.5a1 1 0 0 1-1 .9H8.6a1 1 0 0 1-1-.9z"/></svg>About Lantern</a>
     </nav>
@@ -125,7 +127,47 @@
           <div class="row sub"><div><h4>Remembered choices</h4><p id="perm-summary">None yet</p></div><button id="reset-perms" class="btn" type="button" hidden>Reset all</button></div>
           <ul id="perm-list" class="list compact"></ul>
         </div>
-      </section>
+      
+        <div class="card">
+          <div class="row">
+            <div><h3>Ad blocker</h3><p>Blocks ads and trackers before they load (the switch above), and hides the empty boxes they leave behind.</p></div>
+            <label class="switch"><input type="checkbox" data-setting="hideAdElements"><span></span></label>
+          </div>
+          <div class="row">
+            <div><h3>Hide cookie banners and annoyances</h3><p>Adds lists that remove cookie pop-ups, newsletter nags and social widgets. Applies to every profile.</p></div>
+            <label class="switch"><input type="checkbox" id="svc-annoy"><span></span></label>
+          </div>
+          <div class="row">
+            <div><h3>Remove tracking from links</h3><p>Strips utm_source, fbclid, gclid and similar from addresses before a page loads. Right-click any link for <b>Copy clean link</b>.</p></div>
+            <label class="switch"><input type="checkbox" data-setting="stripTracking"><span></span></label>
+          </div>
+          <div class="row">
+            <div><h3>Fingerprint protection</h3><p>Sites that read your canvas, audio or hardware details get slightly different answers on each site, so the readings can't follow you. Strict also hides your graphics card and battery, and keeps WebRTC from revealing your local network address.</p></div>
+            <select data-setting="fingerprinting"><option value="off">Off</option><option value="standard">Standard</option><option value="strict">Strict</option></select>
+          </div>
+          <div class="row">
+            <div><h3>Secure DNS</h3><p>Encrypts the addresses you look up, so your network can't see or change them.</p></div>
+            <select id="svc-dns"><option value="automatic">Automatic</option><option value="cloudflare">Cloudflare</option><option value="quad9">Quad9</option><option value="google">Google</option><option value="mullvad">Mullvad</option><option value="adguard">AdGuard (blocks ads too)</option><option value="custom">Custom…</option><option value="off">Off</option></select>
+          </div>
+          <div class="row sub" id="dns-custom-row" hidden><div><h4>Custom DNS-over-HTTPS address</h4></div><div class="btns"><input id="dns-custom" class="text" placeholder="https://dns.example.com/dns-query"><button id="dns-save" class="btn" type="button">Save</button></div></div>
+        </div>
+        <div class="card">
+          <div class="row head"><div><h3>Shields for each site</h3><p>Click the shield in the address bar to turn blocking off for a site, or allow its fingerprinting or cookies. Your exceptions:</p></div><button id="shields-reset-all" class="btn" type="button">Reset all</button></div>
+          <ul id="shields-list" class="simple-list"></ul>
+        </div>
+        <div class="card">
+          <div class="row head"><div><h3>Lantern services</h3><p id="svc-summary">The only requests Lantern makes on its own. The sites you visit aren't listed here.</p></div><button id="svc-refresh" class="btn" type="button">Refresh</button></div>
+          <div class="row">
+            <div><h3>Update the ad and tracker lists</h3><p>Downloads fresh block lists once a week. Off: Lantern keeps using the copy it already has.</p></div>
+            <label class="switch"><input type="checkbox" id="svc-trackers"><span></span></label>
+          </div>
+          <div class="row">
+            <div><h3>Update the scam and malware lists</h3><p>Checks twice a day for new dangerous sites. The sites you visit are still checked on your device.</p></div>
+            <label class="switch"><input type="checkbox" id="svc-threats"><span></span></label>
+          </div>
+          <ul id="svc-log" class="svc-log"></ul>
+        </div>
+</section>
 
       <!-- AI assistant -->
       <section id="ai" class="section">
@@ -193,9 +235,57 @@
             </ol>
           </div>
         </div>
-      </section>
+      
+        <div class="card">
+          <div class="row">
+            <div><h3>!Bangs</h3><p>Type <b>!w moon</b> or <b>moon !w</b> to search Wikipedia directly, <b>!yt</b> for YouTube, <b>!gh</b> for GitHub and 180 more. Lantern works them out on your device and goes straight to the site. Use <b>@tabs</b>, <b>@history</b> or <b>@bookmarks</b> to search those.</p></div>
+            <label class="switch"><input type="checkbox" data-setting="bangs"><span></span></label>
+          </div>
+          <div class="row sub"><div><h4>Your own bangs</h4><p class="hint">Yours win over the built-in ones. Put <b>{q}</b> or <b>%s</b> where the search goes.</p></div></div>
+          <ul id="mybangs" class="simple-list"></ul>
+          <form id="bang-form" class="bang-form">
+            <input id="bang-trigger" class="text" placeholder="!jira" maxlength="25" spellcheck="false">
+            <input id="bang-name" class="text" placeholder="Name (optional)" maxlength="40">
+            <input id="bang-url" class="text" placeholder="https://example.com/search?q={q}" spellcheck="false">
+            <button class="btn" type="submit">Add</button>
+            <span id="bang-msg" class="hint"></span>
+          </form>
+          <div class="row sub"><div><h4>Built-in bangs</h4></div><input id="bang-filter" class="text" placeholder="Search bangs"></div>
+          <ul id="bang-list" class="bang-list"></ul>
+        </div>
+</section>
 
       <!-- Appearance -->
+      <!-- Tabs and layout -->
+      <section id="tabs" class="section">
+        <h2>Tabs and layout</h2>
+        <div class="card">
+          <div class="row">
+            <div><h3>Tab layout</h3><p>Vertical tabs sit in a sidebar, so long titles stay readable. Shortcut: ⇧⌘E / Ctrl+Shift+E.</p></div>
+            <select data-setting="tabLayout"><option value="horizontal">Tabs on top</option><option value="vertical">Vertical tabs</option></select>
+          </div>
+          <div class="row sub"><div><h4>Sidebar side</h4></div><select data-setting="tabSide"><option value="left">Left</option><option value="right">Right</option></select></div>
+          <div class="row sub"><div><h4>Collapse the sidebar to icons</h4></div><label class="switch"><input type="checkbox" data-setting="tabsCollapsed"><span></span></label></div>
+          <div class="row">
+            <div><h3>Compact mode</h3><p>Smaller tabs, toolbar and bookmarks bar, more room for pages.</p></div>
+            <label class="switch"><input type="checkbox" data-setting="compactMode"><span></span></label>
+          </div>
+        </div>
+        <div class="card">
+          <div class="row">
+            <div><h3>Split view</h3><p>Two tabs side by side: the split button in the toolbar, ⌥⌘S, Shift+click a tab, or right-click a tab or link. Drag the divider to resize.</p></div>
+            <label class="switch" title="Show the split view button"><input type="checkbox" data-setting="showSplitButton"><span></span></label>
+          </div>
+          <div class="row">
+            <div><h3>Tab groups</h3><p>Right-click a tab and choose <b>Add tab to group</b>. Click a group to fold it away, double-click to rename it, drag tabs onto it to add them.</p></div>
+          </div>
+          <div class="row">
+            <div><h3>Ctrl+Tab goes to the tab you used last</h3><p>Hold Ctrl and press Tab again to go further back, like switching apps. Off: Ctrl+Tab goes to the tab on the right.</p></div>
+            <label class="switch"><input type="checkbox" data-setting="mruTabSwitching"><span></span></label>
+          </div>
+        </div>
+      </section>
+
       <section id="appearance" class="section">
         <h2>Appearance</h2>
         <div class="card">
@@ -289,6 +379,26 @@
       </section>
 
       <!-- Downloads -->
+      <!-- Import and apps -->
+      <section id="import" class="section">
+        <h2>Import and apps</h2>
+        <div class="card">
+          <div class="row head"><div><h3>Import from another browser</h3><p>Bookmarks and history from Chrome, Brave, Edge, Helium, Arc, Vivaldi, Opera or Firefox on this computer. Read on your device, never uploaded.</p></div></div>
+          <div class="import-row">
+            <select id="import-source"><option value="">Looking for browsers…</option></select>
+            <label class="chk"><input type="checkbox" id="import-bm" checked> Bookmarks</label>
+            <label class="chk"><input type="checkbox" id="import-hist" checked> History</label>
+            <button id="import-go" class="btn" type="button">Import</button>
+          </div>
+          <p id="import-msg" class="hint"></p>
+          <div class="row sub"><div><h4>Bookmarks file</h4><p class="hint">The HTML file every browser and Raindrop.io can export and import.</p></div><div class="btns"><button id="import-html" class="btn" type="button">Import file…</button><button id="export-html" class="btn" type="button">Export…</button></div></div>
+        </div>
+        <div class="card">
+          <div class="row head"><div><h3>Apps</h3><p>Any site can run in its own window, without tabs or a toolbar. Open the site, then choose <b>Apps → Install … as an app</b> from the ⋮ menu.</p></div></div>
+          <ul id="apps-list" class="simple-list"></ul>
+        </div>
+      </section>
+
       <section id="downloads" class="section">
         <h2>Downloads</h2>
         <div class="card">

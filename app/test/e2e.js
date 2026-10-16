@@ -1,5 +1,5 @@
 'use strict';
-// End-to-end test of Lantern 1.5 in a real Electron window (development only).
+// End-to-end test of Lantern 1.6 in a real Electron window (development only).
 // Run: LANTERN_TEST_SHOT=/tmp/shots LANTERN_AI_MOCK=1 LANTERN_NO_EXT=1 LANTERN_TEST_SCRIPT=test/e2e.js electron .
 const fs = require('fs');
 const path = require('path');
@@ -46,7 +46,7 @@ module.exports = async function run(t) {
   const panelJs = (code) => w.panel.webContents.executeJavaScript(code);
 
   // ---- Rust core is loaded ----
-  check('rust core loads', core.version() === '1.5.0', core.version());
+  check('rust core loads', /^1\.6\./.test(core.version()), core.version());
 
   // ---- history ----
   await load(`${base}/article.html`);
@@ -247,6 +247,174 @@ module.exports = async function run(t) {
   pw.win.close();
   await wait(800);
   check('private context ends with its window', !contexts.has(pw.ctx.id));
+
+  // ======================= 1.6 =======================
+  const { setTabSetting, toggleTabLayout, getServices, serviceLog, importer, openAppWindow, tabLayoutMenu, appsMenu } = t;
+  // Full window picture: the frame plus each visible page placed where it sits (stitched later).
+  const shootFull = async (name, win = w) => {
+    fs.writeFileSync(path.join(TEST_SHOT_DIR, `${name}-full-ui.png`), (await win.win.webContents.capturePage()).toPNG());
+    const panes = (win.layoutInfo && win.layoutInfo.panes) || [];
+    const meta = [];
+    for (const [i, p] of panes.entries()) {
+      const tab = win.tabs.get(p.id);
+      if (!tab || !tab.view) continue;
+      fs.writeFileSync(path.join(TEST_SHOT_DIR, `${name}-full-pane${i}.png`), (await tab.view.webContents.capturePage()).toPNG());
+      meta.push({ i, x: p.x, y: p.y, w: p.width, h: p.height });
+    }
+    if (win.panelOpen && win.panel) { win.closePanel(); }
+    fs.writeFileSync(path.join(TEST_SHOT_DIR, `${name}-full.json`), JSON.stringify(meta));
+  };
+
+  // bangs
+  check('bang prefix', core.bangs.resolve('!w lantern').url.startsWith('https://en.wikipedia.org/'));
+  const sugg = await w.win.webContents.executeJavaScript(`window.lanternUI.suggest('!y', false)`);
+  check('bang suggestions', sugg.some((x) => x.type === 'bang' && x.trigger === 'yt'), sugg.map((x) => x.trigger).join(','));
+  const sugg2 = await w.win.webContents.executeJavaScript(`window.lanternUI.suggest('lantern history !w', false)`);
+  check('bang suffix suggestion', sugg2[0] && sugg2[0].type === 'bang', sugg2[0] && sugg2[0].text);
+  await load(`${base}/start.html`);
+  w.win.webContents.send('focus-omnibox-text', '!gh lantern browser');
+  await wait(400);
+  await shoot('bangs');
+  w.send('omnibox-done');
+  await w.activeWc().executeJavaScript('1');
+  // tracking parameters stripped before load
+  await load(`${base}/clean.html?id=7&utm_source=news&fbclid=abc`);
+  await wait(300);
+  check('tracking parameters stripped', w.activeWc().getURL() === `${base}/clean.html?id=7`, w.activeWc().getURL());
+
+  // tab groups
+  for (const p of ['/g1.html', '/g2.html', '/g3.html']) w.createTab(base + p, { activate: false });
+  await wait(1200);
+  const ids = w.order.slice(-3);
+  const grp = w.addToGroup(ids[0]);
+  grp.name = 'Research';
+  w.addToGroup(ids[1], grp.id);
+  const g2 = w.addToGroup(ids[2]);
+  g2.name = 'Shopping'; g2.color = 'green';
+  w.broadcast();
+  check('groups keep tabs together', w.order.indexOf(ids[1]) === w.order.indexOf(ids[0]) + 1);
+  check('groups listed in state', w.groups.size === 2);
+  await wait(500);
+  await shoot('groups');
+
+  // split view
+  w.activateTab(ids[0]);
+  w.splitWith(ids[1], ids[0]);
+  await wait(900);
+  check('split view shows two pages', w.panes().length === 2 && w.layoutInfo.panes.length === 2, JSON.stringify(w.layoutInfo.panes.map((p) => p.width)));
+  w.split.ratio = 0.35; w.layout();
+  await wait(300);
+  check('split ratio applies', w.layoutInfo.panes[0].width < w.layoutInfo.panes[1].width);
+  await shootFull('split');
+  w.tabs.get(ids[1]).view.webContents.focus();
+  await wait(300);
+  check('clicking the other pane makes it active', w.activeId === ids[1], `${w.activeId} vs ${ids[1]}`);
+  w.closeSplit();
+  await wait(300);
+  check('closing split shows one page', w.panes().length === 1);
+
+  // vertical tabs + compact
+  setTabSetting(ctx, 'tabLayout', 'vertical');
+  await wait(900);
+  check('vertical tabs move the page right', w.layoutInfo.vertical && w.layoutInfo.panes[0].x === w.layoutInfo.side, JSON.stringify(w.layoutInfo.panes[0]));
+  await shootFull('vertical');
+  setTabSetting(ctx, 'tabsCollapsed', true);
+  await wait(700);
+  check('collapsed sidebar is narrow', w.layoutInfo.side === 52);
+  await shootFull('vertical-collapsed');
+  setTabSetting(ctx, 'tabsCollapsed', false);
+  setTabSetting(ctx, 'tabSide', 'right');
+  setTabSetting(ctx, 'compactMode', true);
+  await wait(800);
+  check('sidebar on the right', w.layoutInfo.sideRight && w.layoutInfo.panes[0].x === 0);
+  check('compact frame is shorter', w.layoutInfo.toolbar === 38 && w.layoutInfo.top === 38 + w.layoutInfo.bar, String(w.layoutInfo.top));
+  await shootFull('vertical-right-compact');
+  setTabSetting(ctx, 'tabSide', 'left');
+  setTabSetting(ctx, 'compactMode', false);
+  toggleTabLayout(ctx);
+  await wait(800);
+  check('back to tabs on top', !w.layoutInfo.vertical && w.layoutInfo.top === 84 + (ctx.settings.bookmarksBar ? 32 : 0), String(w.layoutInfo.top));
+
+  // MRU switching
+  ctx.settings.mruTabSwitching = true;
+  w.activateTab(ids[2]); w.activateTab(ids[0]);
+  const fake = { preventDefault() {} };
+  w.handleShortcut(fake, { type: 'keyDown', key: 'Tab', control: true, shift: false });
+  check('ctrl+tab goes to the last used tab', w.activeId === ids[2], `${w.activeId}`);
+  w.handleShortcut(fake, { type: 'keyUp', key: 'Control' });
+  ctx.settings.mruTabSwitching = false;
+
+  // shields + fingerprinting
+  await load(`${base}/fp.html`);
+  const fp1 = await w.activeWc().executeJavaScript(`(() => { const c = document.createElement('canvas'); c.width = 200; c.height = 50; const x = c.getContext('2d'); x.font = '20px sans-serif'; x.fillStyle = '#f60'; x.fillText('Lantern fingerprint', 4, 30); return [c.toDataURL(), c.toDataURL(), navigator.hardwareConcurrency]; })()`);
+  check('canvas readings are stable within a site', fp1[0] === fp1[1]);
+  const plain = await w.win.webContents.executeJavaScript(`(() => { const c = document.createElement('canvas'); c.width = 200; c.height = 50; const x = c.getContext('2d'); x.font = '20px sans-serif'; x.fillStyle = '#f60'; x.fillText('Lantern fingerprint', 4, 30); return c.toDataURL(); })()`);
+  check('canvas readings differ from the real ones', fp1[0] !== plain);
+  const site = '127.0.0.1';
+  ctx.settings.siteShields = { [site]: { off: true } };
+  await load(`${base}/fp.html`);
+  const fp2 = await w.activeWc().executeJavaScript(`(() => { const c = document.createElement('canvas'); c.width = 200; c.height = 50; const x = c.getContext('2d'); x.font = '20px sans-serif'; x.fillStyle = '#f60'; x.fillText('Lantern fingerprint', 4, 30); return c.toDataURL(); })()`);
+  check('shields down turns protection off for the site', fp2 === plain);
+  check('state says shields are down', w.tabState(w.activeTab()).shields === false);
+  await shoot('shields-down');
+  ctx.settings.siteShields = {};
+
+  // services + DNS
+  check('services default on', getServices().trackerLists && getServices().threatLists);
+  const sv = await w.activeWc().executeJavaScript('1').then(() => null);
+  await load('lantern://app/settings.html#privacy');
+  await wait(1200);
+  const svc = await w.activeWc().executeJavaScript(`window.lantern.services()`);
+  check('services log is readable', Array.isArray(svc.log) && svc.startedAt > 0, `${svc.log.length} entries`);
+  await w.activeWc().executeJavaScript(`document.getElementById('svc-dns').scrollIntoView({ block: 'center' })`);
+  await wait(400);
+  await shoot('settings-privacy');
+  await load('lantern://app/settings.html#tabs');
+  await wait(900);
+  await shoot('settings-tabs');
+  await load('lantern://app/settings.html#search');
+  await wait(900);
+  await w.activeWc().executeJavaScript(`document.getElementById('bang-form').scrollIntoView({ block: 'center' })`);
+  const added = await w.activeWc().executeJavaScript(`(async () => { await window.lantern.setSetting('customBangs', [{ trigger: 'lt', name: 'Lantern test', url: '${base}/q?x={q}' }]); return true; })()`);
+  ctx.settings.customBangs = (await w.activeWc().executeJavaScript(`window.lantern.info()`)).settings.customBangs;
+  check('custom bang works', core.bangs.resolve('!lt hello', ctx.settings.customBangs).url === `${base}/q?x=hello`);
+  await wait(500);
+  await shoot('settings-bangs');
+
+  // import from a bookmarks file
+  const html = `<!DOCTYPE NETSCAPE-Bookmark-file-1><DL><p><DT><H3>Bookmarks bar</H3><DL><p><DT><A HREF="https://example.org/a" ADD_DATE="1700000000">Example A</A><DT><H3>Recipes</H3><DL><p><DT><A HREF="https://food.example/soup">Soup &amp; bread</A></DL><p></DL><p></DL>`;
+  const parsed = importer.parseBookmarksHtml(html);
+  check('bookmarks file parses with folders', parsed.length === 2 && parsed[1].folder === 'Recipes' && parsed[1].title === 'Soup & bread', JSON.stringify(parsed));
+  const n = ctx.library.importBookmarks(parsed);
+  check('imported bookmarks are added once', n === 2 && ctx.library.importBookmarks(parsed) === 0);
+  check('export makes a bookmarks file', ctx.library.exportHtml().includes('<H3>Recipes</H3>'));
+  check('browser sources listed without error', Array.isArray(importer.listSources()));
+  await load('lantern://app/settings.html#import');
+  await wait(1200);
+  await shoot('settings-import');
+
+  // @tabs search
+  const tabsSugg = await w.win.webContents.executeJavaScript(`window.lanternUI.suggest('@tabs g2', false)`);
+  check('@tabs finds open tabs', tabsSugg.length >= 1 && tabsSugg[0].type === 'tab', JSON.stringify(tabsSugg.map((x) => x.sub)));
+
+  // site app window
+  const before16 = require('electron').BrowserWindow.getAllWindows().length;
+  const appWin = openAppWindow(ctx, { id: 'test', name: 'Test app', url: `${base}/app.html` });
+  await wait(1200);
+  check('app opens in its own window', require('electron').BrowserWindow.getAllWindows().length === before16 + 1 && appWin.webContents.getURL().endsWith('/app.html'));
+  appWin.close();
+  check('layout and apps menus build', tabLayoutMenu(w).length > 5 && appsMenu(w).length >= 2);
+
+  // incognito badge
+  const pw2 = await openPrivateWindow(ctx);
+  pw2.win.setContentSize(1280, 820);
+  pw2.win.showInactive();
+  await wait(1500);
+  const badge = await pw2.win.webContents.executeJavaScript(`document.getElementById('private-badge').textContent.trim()`);
+  check('incognito window is labelled', badge === 'Incognito', badge);
+  await shoot('incognito', pw2);
+  pw2.win.close();
+  await wait(600);
 
   server.close();
   const failed = results.filter((x) => !x.ok);

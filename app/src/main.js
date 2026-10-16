@@ -10,8 +10,10 @@ const { buildSummary } = require('./summary');
 const { search, suggest } = require('./search');
 const { reducedUserAgent } = require('./identity');
 const { Profiles, ENGINES, COLORS, DEFAULT_SETTINGS } = require('./profiles');
-const { setupPrivacy, hostOf } = require('./privacy');
+const { setupPrivacy, hostOf, siteOf } = require('./privacy');
+const siteOfUrl = (url) => siteOf(hostOf(url));
 const { ThreatLists, parseList, isRiskyFile } = require('./safety');
+const importer = require('./importer');
 const { execFile } = require('child_process');
 const crypto = require('crypto');
 const core = require('./core');
@@ -23,6 +25,7 @@ const IS_MAC = process.platform === 'darwin';
 const UI_HEIGHT = 84; // tab strip (40) + toolbar (44)
 const BAR_HEIGHT = 32; // bookmarks bar, when it's shown
 const PANEL_WIDTH = 392; // side panel (AI, reading mode, share)
+const GROUP_COLORS = ['grey', 'blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'orange'];
 const PAGES_DIR = path.join(__dirname, 'pages');
 const INTERNAL = 'lantern://app/';
 const NEWTAB_URL = INTERNAL + 'newtab.html';
@@ -168,6 +171,9 @@ class ProfileContext {
       get settings() { return ctx.settings; },
       saveSettings: () => this.saveSettings(),
       getBlocker: () => blocker,
+      shieldsForSite: (site) => this.shieldsForSite(site),
+      cleanUrl: (u) => { try { return core.cleanUrl(u).url; } catch { return u; } },
+      onCleaned: (wcId) => { const t = findTabByWebContentsId(wcId); if (t) t.cleaned = (t.cleaned || 0) + 1; },
       onBlocked: (wcId) => this.noteBlocked(wcId),
       tabFor: (wcId) => findTabByWebContentsId(wcId),
       getThreats: () => threats,
@@ -334,14 +340,38 @@ class ProfileContext {
     this.scheduleBroadcast();
   }
 
+  injectCosmetics(wc) {
+    try {
+      const url = wc.getURL();
+      if (!blocker || !/^https?:/.test(url) || this.settings.blockTrackers === false || this.settings.hideAdElements === false) return;
+      if (!this.shieldsFor(url).on) return;
+      const hostname = hostOf(url);
+      const { styles } = blocker.getCosmeticsFilters({ url, hostname, domain: siteOf(hostname), getBaseRules: true, getInjectionRules: false, getExtendedRules: false, getRulesFromDOM: false, getRulesFromHostname: true });
+      if (styles) wc.insertCSS(styles, { cssOrigin: 'user' }).catch(() => {});
+    } catch {}
+  }
+  get fpSalt() { return this._fpSalt || (this._fpSalt = crypto.randomBytes(16)); }
+
+  // ----- Shields: per-site exceptions to tracker blocking, fingerprinting and cookie blocking -----
+  shieldsForSite(site) {
+    const c = (this.settings.siteShields || {})[String(site || '').toLowerCase()] || {};
+    const on = !c.off;
+    return { on, fp: on && c.fp !== false && (this.settings.fingerprinting || 'standard') !== 'off', cookies: on && c.cookies !== false };
+  }
+  shieldsFor(url) { return this.shieldsForSite(siteOfUrl(url)); }
+
   // ----- crash-safe session saving (pattern learned from Min via REA) -----
   snapshot() {
     return {
       savedAt: Date.now(),
-      windows: this.windows().map((w) => ({
-        tabs: w.order.map((id) => w.tabs.get(id)).filter((t) => t && !/^lantern:\/\/app\/(newtab|settings|library)/.test(t.url))
-          .map((t) => ({ url: t.url, title: t.title, pinned: !!t.pinned })),
-      })).filter((w) => w.tabs.length),
+      windows: this.windows().map((w) => {
+        const tabs = w.order.map((id) => w.tabs.get(id)).filter((t) => t && !/^lantern:\/\/app\/(newtab|settings|library)/.test(t.url));
+        const gids = [...new Set(tabs.map((t) => t.group).filter((g) => g && w.groups.has(g)))];
+        return {
+          groups: gids.map((g) => { const x = w.groups.get(g); return { name: x.name, color: x.color, collapsed: x.collapsed }; }),
+          tabs: tabs.map((t) => ({ url: t.url, title: t.title, pinned: !!t.pinned, group: t.group && gids.includes(t.group) ? gids.indexOf(t.group) : null })),
+        };
+      }).filter((w) => w.tabs.length),
     };
   }
   saveSession() {
@@ -414,8 +444,15 @@ function cleanUserAgent(ua) { return reducedUserAgent(ua); }
 // Window controller: tab strip, toolbar and tabs for one window
 // ============================================================================
 class WindowController {
-  constructor(ctx, { urls = [], activeIndex = 0, pinned = [] } = {}) {
+  constructor(ctx, { urls = [], activeIndex = 0, pinned = [], groups = [], tabGroups = [] } = {}) {
     this.ctx = ctx;
+    this.groups = new Map();   // tab groups: id -> { id, name, color, collapsed }
+    this.nextGroup = 1;
+    this.split = null;         // split view: { a, b, ratio }
+    this.mru = [];             // tab ids, most recently used first
+    this.mruWalk = null;       // Ctrl+Tab walk in progress
+    this.dragging = false;     // the sidebar or split divider is being dragged
+    this.layoutInfo = null;
     this.tabs = new Map();
     this.order = [];
     this.activeId = null;
@@ -472,14 +509,35 @@ class WindowController {
     });
     this.win.webContents.once('did-finish-load', () => {
       const list = urls.length ? urls : [NEWTAB_URL];
-      list.forEach((u, i) => this.createTab(u, { activate: i === activeIndex, pinned: !!pinned[i] }));
+      const gids = groups.map((g) => this.makeGroup(g.name, g.color, g.collapsed).id);
+      list.forEach((u, i) => {
+        const t = this.createTab(u, { activate: i === activeIndex, pinned: !!pinned[i] });
+        const gi = tabGroups[i];
+        if (Number.isInteger(gi) && gids[gi] && !t.pinned) t.group = gids[gi];
+      });
       if (!this.activeId && this.order.length) this.activateTab(this.order[0]);
+      this.broadcast();
     });
   }
 
-  uiHeight() {
-    const bar = this.ctx.settings.bookmarksBar && !this.win.isFullScreen();
-    return UI_HEIGHT + (bar ? BAR_HEIGHT : 0);
+  // Sizes of the browser frame: tab strip (or vertical sidebar), toolbar and bookmarks bar.
+  metrics() {
+    const s = this.ctx.settings;
+    const full = !this.win.isDestroyed() && this.win.isFullScreen();
+    const compact = !!s.compactMode;
+    const vertical = s.tabLayout === 'vertical';
+    const strip = vertical ? 0 : (compact ? 32 : 40);
+    const toolbar = compact ? 38 : 44;
+    const bar = s.bookmarksBar && !full ? (compact ? 28 : BAR_HEIGHT) : 0;
+    const side = vertical ? (s.tabsCollapsed ? 52 : Math.max(160, Math.min(400, Number(s.tabsWidth) || 220))) : 0;
+    return { compact, vertical, strip, toolbar, bar, top: strip + toolbar + bar, side, sideRight: vertical && s.tabSide === 'right', collapsed: vertical && !!s.tabsCollapsed };
+  }
+  uiHeight() { return this.metrics().top; }
+  // The tabs on screen: one, or two side by side in split view.
+  panes() {
+    const sp = this.split;
+    if (sp && this.tabs.has(sp.a) && this.tabs.has(sp.b) && (this.activeId === sp.a || this.activeId === sp.b)) return [sp.a, sp.b];
+    return this.tabs.has(this.activeId) ? [this.activeId] : [];
   }
 
   send(channel, payload) { if (!this.win.isDestroyed()) this.win.webContents.send(channel, payload); }
@@ -487,12 +545,37 @@ class WindowController {
   layout() {
     if (this.win.isDestroyed()) return;
     const [w, h] = this.win.getContentSize();
-    const top = this.uiHeight();
+    const m = this.metrics();
+    const top = m.top;
     // The side panel takes the right edge, like Chrome's; narrow windows give it less room.
     const pw = this.panelOpen ? Math.min(PANEL_WIDTH, Math.max(300, Math.round(w * 0.42))) : 0;
-    const t = this.tabs.get(this.activeId);
-    if (t && t.view) t.view.setBounds({ x: 0, y: top, width: Math.max(0, w - pw), height: Math.max(0, h - top) });
-    if (this.panel && this.panelOpen) this.panel.setBounds({ x: w - pw, y: top, width: pw, height: Math.max(0, h - top) });
+    const x0 = m.sideRight ? 0 : m.side;
+    const cw = Math.max(0, w - m.side - pw);
+    const ch = Math.max(0, h - top);
+    const ids = this.panes();
+    const panes = [];
+    if (ids.length === 2) {
+      // Split view: two pages with a gap for the divider, each inset so the focused one can be outlined.
+      const inset = 4; const gap = 10;
+      const usable = Math.max(0, cw - inset * 2 - gap);
+      const lw = Math.round(usable * Math.max(0.2, Math.min(0.8, this.split.ratio || 0.5)));
+      panes.push({ id: ids[0], x: x0 + inset, y: top + inset, width: lw, height: Math.max(0, ch - inset * 2) });
+      panes.push({ id: ids[1], x: x0 + inset + lw + gap, y: top + inset, width: usable - lw, height: Math.max(0, ch - inset * 2) });
+    } else if (ids.length === 1) {
+      panes.push({ id: ids[0], x: x0, y: top, width: cw, height: ch });
+    }
+    if (!this.dragging) {
+      for (const p of panes) { const t = this.tabs.get(p.id); if (t && t.view) t.view.setBounds({ x: p.x, y: p.y, width: p.width, height: p.height }); }
+    }
+    const px = m.sideRight ? w - m.side - pw : w - pw;
+    if (this.panel && this.panelOpen) this.panel.setBounds({ x: px, y: top, width: pw, height: ch });
+    if (!IS_MAC && this.win.setTitleBarOverlay) {
+      const oh = m.vertical ? m.toolbar : m.strip;
+      if (this._overlayH !== oh) { this._overlayH = oh; try { this.win.setTitleBarOverlay({ ...overlayColors(), height: oh }); } catch {} }
+    }
+    const info = { ...m, width: w, height: h, contentX: x0, contentW: cw, panelW: pw, panes, split: ids.length === 2 };
+    const key = JSON.stringify(info);
+    if (key !== this._layoutKey) { this._layoutKey = key; this.layoutInfo = info; this.broadcast(); }
   }
 
   tabState(t) {
@@ -508,6 +591,10 @@ class WindowController {
       muted: wc ? wc.isAudioMuted() : !!t.muted,
       zoom: wc && !isInternal(t.url) ? Math.round(wc.getZoomFactor() * 100) : 100,
       bookmarked: /^https?:/.test(t.url) && this.ctx.library.isBookmarked(t.url),
+      group: t.group || null,
+      cleaned: t.cleaned || 0,
+      split: !!(this.split && (this.split.a === t.id || this.split.b === t.id)),
+      shields: /^https?:/.test(t.url) ? this.ctx.shieldsFor(t.url).on : true,
     };
   }
 
@@ -533,7 +620,13 @@ class WindowController {
         showAiButton: ctx.settings.showAiButton !== false,
         inlineAutocomplete: ctx.settings.inlineAutocomplete !== false,
         defaultZoom: Math.round((Number(ctx.settings.defaultZoom) || 1) * 100),
+        showSplitButton: ctx.settings.showSplitButton !== false,
+        fingerprinting: ctx.settings.fingerprinting || 'standard',
       },
+      layout: this.layoutInfo,
+      groups: [...this.groups.values()],
+      split: this.split && this.panes().length === 2 ? { a: this.split.a, b: this.split.b, ratio: this.split.ratio } : (this.split ? { a: this.split.a, b: this.split.b, ratio: this.split.ratio, hidden: true } : null),
+      dragShots: this.dragShots || null,
       palette: ctx.palette(),
       private: ctx.isPrivate,
       ai: (() => { const st = ctx.ai.state(); return { active: st.active, name: st.activeName }; })(),
@@ -565,7 +658,7 @@ class WindowController {
     view.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#0a0b0e' : '#fbfbfd');
     t.view = view;
     const wc = view.webContents;
-    wc.setWebRTCIPHandlingPolicy('default_public_interface_only');
+    wc.setWebRTCIPHandlingPolicy(ctx.settings.fingerprinting === 'strict' ? 'disable_non_proxied_udp' : 'default_public_interface_only');
     if (t.muted) wc.setAudioMuted(true);
     if (ctx.extensions) ctx.extensions.addTab(wc, this.win);
 
@@ -583,12 +676,24 @@ class WindowController {
     });
     wc.on('page-favicon-updated', (_e, icons) => { t.favicon = icons[0] || ''; this.broadcast(); });
     wc.on('did-start-loading', () => { t.loading = true; this.broadcast(); });
-    wc.on('focus', () => { if (this.suggestItems && this.suggestItems.length) { this.hideSuggestions(); this.send('omnibox-done'); } });
+    // Ad blocker, part two: hide the empty boxes ads leave behind, and cookie banners.
+    wc.on('dom-ready', () => { this.ctx.injectCosmetics(wc); });
+    wc.on('focus', () => {
+      if (this.suggestItems && this.suggestItems.length) { this.hideSuggestions(); this.send('omnibox-done'); }
+      // Clicking into the other half of a split view makes it the tab the toolbar works on.
+      if (this.activeId !== t.id && this.panes().includes(t.id)) {
+        this.activeId = t.id;
+        this.touchMru(t.id);
+        if (this.ctx.extensions) this.ctx.extensions.selectTab(wc);
+        this.panelSendTab();
+        this.broadcast();
+      }
+    });
     wc.on('did-stop-loading', () => { t.loading = false; this.broadcast(); });
     wc.on('media-started-playing', () => this.broadcast());
     wc.on('media-paused', () => this.broadcast());
     wc.on('found-in-page', (_e, r) => this.send('find-result', { active: r.activeMatchOrdinal, total: r.matches }));
-    wc.on('did-start-navigation', (d) => { if (d.isMainFrame && !d.isSameDocument) { t.blocked = 0; t.favicon = ''; } });
+    wc.on('did-start-navigation', (d) => { if (d.isMainFrame && !d.isSameDocument) { t.blocked = 0; t.favicon = ''; if (!d.isRedirect) t.cleaned = 0; } });
     const onNav = (_e, navUrl) => {
       if (navUrl !== t.url) {
         const q = searchQueryOf(navUrl);
@@ -692,17 +797,14 @@ class WindowController {
   activateTab(id) {
     const t = this.tabs.get(id);
     if (!t || this.win.isDestroyed()) return;
-    if (!t.view || t.view.webContents.isDestroyed()) this._attachView(t, t.url); // wake a sleeping tab
-    for (const other of this.tabs.values()) {
-      if (other.id !== id && other.view && this.win.contentView.children.includes(other.view)) this.win.contentView.removeChildView(other.view);
-    }
-    if (!this.win.contentView.children.includes(t.view)) this.win.contentView.addChildView(t.view);
     this.hideSuggestions();
     const prev = this.tabs.get(this.activeId);
     if (prev) prev.lastActive = Date.now();
     this.activeId = id;
     t.lastActive = Date.now();
-    this.layout();
+    this.touchMru(id);
+    if (t.group && this.groups.get(t.group)?.collapsed) this.groups.get(t.group).collapsed = false;
+    this.showPanes();
     if (this.ctx.extensions) this.ctx.extensions.selectTab(t.view.webContents);
     if (t.url === NEWTAB_URL) this.send('focus-omnibox');
     else t.view.webContents.focus();
@@ -710,12 +812,151 @@ class WindowController {
     this.broadcast();
   }
 
+  // Puts the visible tab(s) in the window and takes every other tab out.
+  showPanes() {
+    const visible = this.panes();
+    for (const vid of visible) { const v = this.tabs.get(vid); if (v && (!v.view || v.view.webContents.isDestroyed())) this._attachView(v, v.url); } // wake sleeping tabs
+    for (const other of this.tabs.values()) {
+      if (!visible.includes(other.id) && other.view && this.win.contentView.children.includes(other.view)) this.win.contentView.removeChildView(other.view);
+    }
+    if (!this.dragging) {
+      for (const vid of visible) { const v = this.tabs.get(vid); if (v && v.view && !this.win.contentView.children.includes(v.view)) this.win.contentView.addChildView(v.view, this.panelOpen && this.panel ? Math.max(0, this.win.contentView.children.indexOf(this.panel)) : undefined); }
+    }
+    this.layout();
+  }
+  touchMru(id) {
+    if (this.mruWalk) return;
+    this.mru = [id, ...this.mru.filter((x) => x !== id && this.tabs.has(x))];
+  }
+
+  // ---------- split view ----------
+  splitWith(otherId, id = this.activeId) {
+    if (!this.tabs.has(otherId) || !this.tabs.has(id) || otherId === id) return;
+    this.split = { a: id, b: otherId, ratio: 0.5 };
+    this.activeId = id;
+    this.showPanes();
+    this.broadcast();
+  }
+  splitNew(url = NEWTAB_URL) {
+    const base = this.activeId;
+    const t = this.createTab(url, { index: this.order.indexOf(base) + 1, activate: false });
+    this.split = { a: base, b: t.id, ratio: 0.5 };
+    this.activateTab(t.id);
+  }
+  closeSplit() {
+    if (!this.split) return;
+    this.split = null;
+    this.showPanes();
+    this.broadcast();
+  }
+  swapSplit() {
+    if (!this.split) return;
+    this.split = { ...this.split, a: this.split.b, b: this.split.a, ratio: 1 - this.split.ratio };
+    this.layout();
+    this.broadcast();
+  }
+
+  // ---------- tab groups ----------
+  makeGroup(name = '', color = GROUP_COLORS[(this.nextGroup - 1) % GROUP_COLORS.length], collapsed = false) {
+    const g = { id: this.nextGroup++, name: String(name || '').slice(0, 40), color: GROUP_COLORS.includes(color) ? color : GROUP_COLORS[0], collapsed: !!collapsed };
+    this.groups.set(g.id, g);
+    return g;
+  }
+  addToGroup(id, gid) {
+    const t = this.tabs.get(id);
+    if (!t) return;
+    if (t.pinned) this.setPinned(id, false);
+    const g = gid && this.groups.get(gid) ? this.groups.get(gid) : this.makeGroup();
+    t.group = g.id;
+    this.normalizeGroups(id);
+    this.broadcast();
+    return g;
+  }
+  removeFromGroup(id) {
+    const t = this.tabs.get(id);
+    if (!t || !t.group) return;
+    const gid = t.group;
+    t.group = null;
+    // the tab moves to just after its old group
+    const members = this.order.filter((x) => this.tabs.get(x).group === gid);
+    if (members.length) { this.order = this.order.filter((x) => x !== id); this.order.splice(this.order.indexOf(members[members.length - 1]) + 1, 0, id); }
+    this.pruneGroups();
+    this.broadcast();
+  }
+  // Keeps each group's tabs next to each other, in the order they were in.
+  normalizeGroups(movedId) {
+    const out = [];
+    const placed = new Set();
+    for (const id of this.order) {
+      const t = this.tabs.get(id);
+      if (!t || out.includes(id)) continue;
+      if (!t.group) { out.push(id); continue; }
+      if (placed.has(t.group)) continue;
+      placed.add(t.group);
+      out.push(...this.order.filter((x) => this.tabs.get(x).group === t.group && x !== movedId));
+      if (movedId && this.tabs.get(movedId).group === t.group) out.push(movedId);
+    }
+    this.order = out;
+    this.settleOrder();
+    this.pruneGroups();
+  }
+  pruneGroups() {
+    for (const gid of [...this.groups.keys()]) if (!this.order.some((x) => this.tabs.get(x).group === gid)) this.groups.delete(gid);
+  }
+  closeGroup(gid) {
+    const ids = this.order.filter((x) => this.tabs.get(x).group === gid);
+    if (ids.length === this.order.length) this.createTab(NEWTAB_URL, { activate: false });
+    ids.forEach((x) => this.closeTab(x));
+  }
+  showGroupMenu(gid, x, y) {
+    const g = this.groups.get(gid);
+    if (!g) return;
+    const members = this.order.filter((id) => this.tabs.get(id).group === gid);
+    const template = [
+      { label: g.name ? `“${g.name}”` : 'Unnamed group', enabled: false },
+      { label: 'Rename…', click: () => this.send('group-rename', gid) },
+      { label: 'Colour', submenu: GROUP_COLORS.map((c) => ({ label: c[0].toUpperCase() + c.slice(1), type: 'radio', checked: g.color === c, click: () => { g.color = c; this.broadcast(); } })) },
+      { label: g.collapsed ? 'Expand group' : 'Collapse group', click: () => { g.collapsed = !g.collapsed; if (g.collapsed && members.includes(this.activeId)) { const next = this.order.find((x) => this.tabs.get(x).group !== gid); if (next) this.activateTab(next); } this.broadcast(); } },
+      { label: 'New tab in group', click: () => { const t = this.createTab(NEWTAB_URL, { index: this.order.indexOf(members[members.length - 1]) + 1 }); this.addToGroup(t.id, gid); } },
+      { type: 'separator' },
+      { label: 'Ungroup', click: () => { members.forEach((id) => { this.tabs.get(id).group = null; }); this.pruneGroups(); this.broadcast(); } },
+      { label: 'Close group', click: () => this.closeGroup(gid) },
+    ];
+    Menu.buildFromTemplate(template).popup({ window: this.win, x: Math.round(x), y: Math.round(y) });
+  }
+
+  // ---------- dragging the sidebar edge or the split divider ----------
+  // The pages are swapped for snapshots while you drag, so the frame keeps receiving the mouse.
+  async startDrag() {
+    if (this.dragging) return;
+    this.dragging = true;
+    const shots = [];
+    for (const id of this.panes()) {
+      const t = this.tabs.get(id);
+      if (!t || !t.view || t.view.webContents.isDestroyed()) continue;
+      try { shots.push({ id, src: (await t.view.webContents.capturePage()).resize({ quality: 'good', width: 900 }).toDataURL() }); } catch {}
+    }
+    if (!this.dragging) return;
+    this.dragShots = shots;
+    for (const id of this.panes()) { const t = this.tabs.get(id); if (t && t.view && this.win.contentView.children.includes(t.view)) this.win.contentView.removeChildView(t.view); }
+    this.broadcast();
+  }
+  endDrag() {
+    if (!this.dragging) return;
+    this.dragging = false;
+    this.dragShots = null;
+    this.showPanes();
+    this.broadcast();
+  }
+
   closeTab(id) {
     const t = this.tabs.get(id);
     if (!t) return;
+    if (this.split && (this.split.a === id || this.split.b === id)) this.split = null;
+    this.mru = this.mru.filter((x) => x !== id);
     const idx = this.order.indexOf(id);
     if (t.url && t.url !== NEWTAB_URL) {
-      this.closed.push({ url: t.view && !t.view.webContents.isDestroyed() ? (t.view.webContents.getURL() || t.url) : t.url, title: t.title, index: idx, pinned: !!t.pinned });
+      this.closed.push({ url: t.view && !t.view.webContents.isDestroyed() ? (t.view.webContents.getURL() || t.url) : t.url, title: t.title, index: idx, pinned: !!t.pinned, group: t.group && this.groups.has(t.group) ? t.group : null });
       if (this.closed.length > 25) this.closed.shift();
     }
     this.order = this.order.filter((x) => x !== id);
@@ -725,20 +966,27 @@ class WindowController {
       if (!t.view.webContents.isDestroyed()) t.view.webContents.close();
     }
     if (!this.order.length) { this.win.close(); return; }
-    if (this.activeId === id) this.activateTab(this.order[Math.min(idx, this.order.length - 1)]);
-    else this.broadcast();
+    this.pruneGroups();
+    if (this.activeId === id) {
+      // Like Chrome: the tab to the right, or with recently-used switching on, the last tab you used.
+      const recent = this.ctx.settings.mruTabSwitching && this.mru.find((x) => this.tabs.has(x));
+      this.activateTab(recent || this.order[Math.min(idx, this.order.length - 1)]);
+    } else this.showPanes();
   }
 
   reopenClosed() {
     const c = this.closed.pop();
     if (!c) return null;
-    return this.createTab(c.url, { index: Math.min(c.index, this.order.length), pinned: c.pinned });
+    const t = this.createTab(c.url, { index: Math.min(c.index, this.order.length), pinned: c.pinned });
+    if (c.group && this.groups.has(c.group)) this.addToGroup(t.id, c.group);
+    return t;
   }
 
   setPinned(id, on) {
     const t = this.tabs.get(id);
     if (!t) return;
     t.pinned = !!on;
+    if (t.pinned) t.group = null;
     this.order = this.order.filter((x) => x !== id);
     const pinnedCount = this.order.filter((x) => this.tabs.get(x).pinned).length;
     this.order.splice(pinnedCount, 0, id);
@@ -747,6 +995,7 @@ class WindowController {
   // Keeps pinned tabs together at the start after a drag.
   settleOrder() {
     this.order = [...this.order.filter((x) => this.tabs.get(x).pinned), ...this.order.filter((x) => !this.tabs.get(x).pinned)];
+    this.pruneGroups();
   }
 
   toggleMute(id) {
@@ -862,6 +1111,18 @@ class WindowController {
       { label: t.pinned ? 'Unpin' : 'Pin', click: () => this.setPinned(id, !t.pinned) },
       { label: muted ? 'Unmute site' : 'Mute site', click: () => this.toggleMute(id) },
       { type: 'separator' },
+      ...(this.split && (this.split.a === id || this.split.b === id)
+        ? [{ label: 'Swap sides', click: () => this.swapSplit() }, { label: 'Close split view', click: () => this.closeSplit() }]
+        : [
+          ...(id !== this.activeId ? [{ label: 'Open in split view with current tab', click: () => this.splitWith(id) }] : []),
+          { label: 'Split view with a new tab', click: () => { this.activateTab(id); this.splitNew(); } },
+        ]),
+      { label: 'Add tab to group', enabled: !t.pinned || true, submenu: [
+        { label: 'New group', click: () => { const g = this.addToGroup(id); this.send('group-rename', g.id); } },
+        ...[...this.groups.values()].filter((g) => g.id !== t.group).map((g) => ({ label: g.name || `${g.color[0].toUpperCase()}${g.color.slice(1)} group`, click: () => this.addToGroup(id, g.id) })),
+      ] },
+      ...(t.group ? [{ label: 'Remove from group', click: () => this.removeFromGroup(id) }] : []),
+      { type: 'separator' },
       { label: marked ? 'Remove bookmark' : 'Bookmark this tab', enabled: web, click: () => this.toggleBookmark(id) },
       { label: 'Copy link', enabled: web, click: () => clipboard.writeText(t.url) },
       { label: 'Ask AI about this tab', enabled: web, click: () => { this.activateTab(id); this.openPanel('ai', { prompt: 'Summarize this page in a few key points.', send: true }); } },
@@ -881,7 +1142,7 @@ class WindowController {
     const template = [
       { label: 'Open in new tab', click: () => this.createTab(b.url, { activate: false, index: this.order.indexOf(this.activeId) + 1 }) },
       { label: 'Open in new window', click: () => openWindow(this.ctx, { urls: [b.url] }) },
-      ...(this.ctx.isPrivate ? [] : [{ label: 'Open in private window', click: () => openPrivateWindow(this.ctx, [b.url]) }]),
+      ...(this.ctx.isPrivate ? [] : [{ label: 'Open in incognito window', click: () => openPrivateWindow(this.ctx, [b.url]) }]),
       { type: 'separator' },
       { label: 'Edit…', click: () => openLibrary(this, 'bookmarks', b.id) },
       { label: 'Copy link', click: () => clipboard.writeText(b.url) },
@@ -934,7 +1195,8 @@ class WindowController {
     const width = Math.min(cw - x, Math.round(Number(rect && rect.width) || 600) + pad * 2);
     const head = !query && this.suggestItems.every((x) => x.type === 'recent') ? 26 : 0;
     const height = 14 + head + this.suggestItems.length * 40 + pad * 2;
-    const top = Math.min(UI_HEIGHT, Math.round(Number(rect && rect.bottom) || UI_HEIGHT - 4)); // popup hangs from the omnibox
+    const m = this.metrics();
+    const top = Math.min(m.strip + m.toolbar, Math.round(Number(rect && rect.bottom) || m.strip + m.toolbar - 4)); // popup hangs from the omnibox
     v.setBounds({ x, y: top - pad, width, height });
     const send = () => v.webContents.send('suggest:render', { items: this.suggestItems, selected, query: String(query || ''), dark: nativeTheme.shouldUseDarkColors, accent: rect && rect.accent });
     if (v.webContents.isLoading()) v.webContents.once('did-finish-load', send); else send();
@@ -950,7 +1212,12 @@ class WindowController {
     this.hideSuggestions();
     this.send('omnibox-done');
     if (!item) return;
-    if (item.type === 'tab') { if (this.tabs.has(item.id)) this.activateTab(item.id); return; }
+    if (item.type === 'tab') {
+      if (this.tabs.has(item.id)) { this.activateTab(item.id); return; }
+      const other = [...windows].find((ww) => ww.tabs.has(item.id) && ww.ctx === this.ctx);
+      if (other) { other.activateTab(item.id); other.win.focus(); }
+      return;
+    }
     if (item.type === 'ai') { this.openPanel('ai', { prompt: item.text, send: true }); return; }
     const wc = this.activeWc();
     if (!wc) return;
@@ -970,9 +1237,29 @@ class WindowController {
     this.activateTab(this.order[(i + dir + this.order.length) % this.order.length]);
   }
   handleShortcut(e, input) {
+    if (input.type === 'keyUp' && input.key === 'Control' && this.mruWalk) {
+      // Letting go of Ctrl settles on the tab you walked to.
+      const id = this.activeId;
+      this.mruWalk = null;
+      this.touchMru(id);
+      return;
+    }
     if (input.type !== 'keyDown') return;
     const mod = IS_MAC ? input.meta : input.control;
-    if (input.control && input.key === 'Tab') { e.preventDefault(); this.cycleTab(input.shift ? -1 : 1); }
+    if (input.control && input.key === 'Tab') {
+      e.preventDefault();
+      if (this.ctx.settings.mruTabSwitching && this.mru.length > 1) {
+        // Most-recently-used order: Ctrl+Tab goes to the tab you were on before, keep Ctrl held to go further back.
+        if (!this.mruWalk) this.mruWalk = { list: this.mru.filter((x) => this.tabs.has(x)), i: 0 };
+        const wk = this.mruWalk;
+        wk.i = (wk.i + (input.shift ? -1 : 1) + wk.list.length) % wk.list.length;
+        this.activateTab(wk.list[wk.i]);
+      } else this.cycleTab(input.shift ? -1 : 1);
+      return;
+    }
+    if (mod && input.shift && input.code === 'Space') { e.preventDefault(); this.send('focus-omnibox-text', '@tabs '); return; }
+    if (mod && input.alt && input.key.toLowerCase() === 's') { e.preventDefault(); if (this.split) this.closeSplit(); else this.splitNew(); return; }
+    if (mod && input.shift && input.key.toLowerCase() === 'e') { e.preventDefault(); toggleTabLayout(this.ctx); return; }
     if (mod && /^[1-9]$/.test(input.key)) {
       e.preventDefault();
       const n = Number(input.key);
@@ -987,8 +1274,10 @@ class WindowController {
       items.push(
         { label: 'Open link in new tab', click: () => this.createTab(p.linkURL, { activate: false, index: this.order.indexOf(t.id) + 1 }) },
         { label: 'Open link in new window', click: () => openWindow(this.ctx, { urls: [p.linkURL] }) },
-        ...(/^https?:/i.test(p.linkURL) && !this.ctx.isPrivate ? [{ label: 'Open link in private window', click: () => openPrivateWindow(this.ctx, [p.linkURL]) }] : []),
+        ...(/^https?:/i.test(p.linkURL) && !this.ctx.isPrivate ? [{ label: 'Open link in incognito window', click: () => openPrivateWindow(this.ctx, [p.linkURL]) }] : []),
+        ...(/^https?:/i.test(p.linkURL) ? [{ label: 'Open link in split view', click: () => { const nt = this.createTab(p.linkURL, { activate: false, index: this.order.indexOf(t.id) + 1 }); this.splitWith(nt.id, t.id); } }] : []),
         { label: 'Copy link address', click: () => clipboard.writeText(p.linkURL) },
+        ...(/^https?:/i.test(p.linkURL) ? [{ label: 'Copy clean link', click: () => clipboard.writeText(core.cleanUrl(p.linkURL).url) }] : []),
         { type: 'separator' },
       );
     }
@@ -1085,7 +1374,40 @@ async function suggestionsFor(ctx, w, input, { remote = false, tabs = true } = {
     ctx.recentSearches.slice(0, 6).forEach((q) => add({ type: 'recent', text: q }));
     return out;
   }
-  if (looksLikeUrl(text)) add({ type: 'url', text, url: toUrl(ctx, text) });
+  // Scoped search, like Chrome: "@tabs query" searches open tabs in every window, "@history" and "@bookmarks" too.
+  const scope = /^@(tabs|history|bookmarks)\b\s*(.*)$/i.exec(text);
+  if (scope) {
+    const kind = scope[1].toLowerCase();
+    const q = scope[2].toLowerCase();
+    if (kind === 'tabs') {
+      for (const ww of windows) {
+        if (ww.ctx !== ctx) continue;
+        for (const id of ww.order) {
+          const t = ww.tabs.get(id);
+          if (!t || (q && !(`${t.title} ${t.url}`.toLowerCase().includes(q)))) continue;
+          out.push({ type: 'tab', id, win: ww === w ? undefined : [...windows].indexOf(ww), text: tabTitle(t), sub: displayUrl(t.url) });
+          if (out.length >= 10) return out;
+        }
+      }
+    } else {
+      const src = kind === 'history' ? ctx.library.queryHistory({ text: q, limit: 10 }) : ctx.library.listBookmarks().filter((b) => !q || `${b.title} ${b.url}`.toLowerCase().includes(q)).slice(0, 10);
+      for (const h of src) out.push({ type: kind === 'history' ? 'history' : 'bookmark', text: h.title || displayUrl(h.url), sub: displayUrl(h.url), url: h.url });
+    }
+    return out;
+  }
+  // !bangs: "!w moon" or "moon !w" searches a site directly; "!yo" lists bangs that start that way.
+  const bang = bangFor(ctx, text);
+  if (bang) {
+    add({ type: 'bang', text: bang.query ? `Search ${bang.name} for “${bang.query}”` : `Open ${bang.name}`, url: bang.url, trigger: bang.trigger });
+  } else if (ctx.settings.bangs !== false && /^![\w.-]*$/.test(text)) {
+    for (const b of core.bangs.suggest(text, ctx.settings.customBangs || [], 6)) {
+      const r = core.bangs.resolve(`!${b.trigger}`, ctx.settings.customBangs || []);
+      if (r) add({ type: 'bang', text: `${b.name}`, sub: undefined, url: r.url, trigger: b.trigger });
+    }
+    return out;
+  }
+  if (bang) { /* the bang row is the answer; history and searches still follow */ }
+  else if (looksLikeUrl(text)) add({ type: 'url', text, url: toUrl(ctx, text) });
   else add({ type: 'search', text, typed: true });
   if (tabs && w) {
     for (const id of w.order) {
@@ -1128,9 +1450,15 @@ function searchUrl(ctx, text, forceSummary = false) {
   if (forceSummary) return `${INTERNAL}search.html?q=${q}&summary=1`;
   return ENGINES[ctx.settings.searchEngine].url.replace('%s', q);
 }
+function bangFor(ctx, text) {
+  if (ctx.settings.bangs === false || !/(^|\s)![\w.-]+(\s|$)/.test(text)) return null;
+  try { return core.bangs.resolve(text, ctx.settings.customBangs || []); } catch { return null; }
+}
 function toUrl(ctx, input, forceSummary) {
   const text = String(input || '').trim();
   if (!text) return NEWTAB_URL;
+  const bang = bangFor(ctx, text);
+  if (bang) { if (bang.query) ctx.rememberSearch(text); return bang.url; }
   if (/^(https?|lantern|file):\/\//i.test(text)) return text;
   if (/^about:blank$/i.test(text)) return text;
   if (/^(settings|lantern:settings)$/i.test(text)) return SETTINGS_URL;
@@ -1239,7 +1567,7 @@ function appMenuTemplate() {
       submenu: [
         { label: 'New Tab', accelerator: 'CmdOrCtrl+T', click: () => (w() ? w().createTab() : openWindow(getContext(profiles.lastUsed().id))) },
         { label: 'New Window', accelerator: 'CmdOrCtrl+N', click: () => openWindow(w() && !w().ctx.isPrivate ? w().ctx : getContext(profiles.lastUsed().id)) },
-        { label: 'New Private Window', accelerator: 'CmdOrCtrl+Shift+N', click: () => openPrivateWindow(base()) },
+        { label: 'New Incognito Window', accelerator: 'CmdOrCtrl+Shift+N', click: () => openPrivateWindow(base()) },
         { label: 'Reopen Closed Tab', accelerator: 'CmdOrCtrl+Shift+T', enabled: recent.length > 0, click: () => w() && w().reopenClosed() },
         { label: 'Open Location', accelerator: 'CmdOrCtrl+L', click: () => w() && w().send('focus-omnibox') },
         { type: 'separator' },
@@ -1259,6 +1587,10 @@ function appMenuTemplate() {
         { label: 'Always Show Bookmarks Bar', type: 'checkbox', checked: barOn, accelerator: 'CmdOrCtrl+Shift+B', click: () => w() && setBookmarksBar(w().ctx, !barOn) },
         { label: 'AI Assistant', accelerator: 'CmdOrCtrl+Shift+A', click: () => w() && w().togglePanel('ai') },
         { label: 'Reading Mode', click: () => w() && w().togglePanel('reader') },
+        { type: 'separator' },
+        { label: 'Vertical Tabs', type: 'checkbox', checked: !!(w() && w().ctx.settings.tabLayout === 'vertical'), accelerator: 'CmdOrCtrl+Shift+E', click: () => w() && toggleTabLayout(w().ctx) },
+        { label: 'Compact Mode', type: 'checkbox', checked: !!(w() && w().ctx.settings.compactMode), click: () => w() && setTabSetting(w().ctx, 'compactMode', !w().ctx.settings.compactMode) },
+        { label: 'Split View', type: 'checkbox', checked: !!(w() && w().split), accelerator: 'CmdOrCtrl+Alt+S', click: () => { const c = w(); if (c) { if (c.split) c.closeSplit(); else c.splitNew(); } } },
         { type: 'separator' },
         { label: 'Reload', accelerator: 'CmdOrCtrl+R', click: () => wc() && wc().reload() },
         { label: 'Hard Reload', accelerator: 'CmdOrCtrl+Shift+R', click: () => wc() && wc().reloadIgnoringCache() },
@@ -1304,6 +1636,115 @@ function appMenuTemplate() {
 }
 function refreshAppMenu() { Menu.setApplicationMenu(Menu.buildFromTemplate(appMenuTemplate())); }
 
+// ---------- picture in picture and screenshots ----------
+async function pictureInPicture(w) {
+  const wc = w.activeWc();
+  if (!wc) return;
+  try {
+    // The biggest video on the page floats above your other windows; run again to put it back.
+    const r = await wc.executeJavaScript(`(async () => {
+      if (document.pictureInPictureElement) { await document.exitPictureInPicture(); return 'closed'; }
+      const vids = [...document.querySelectorAll('video')].filter((v) => v.readyState > 0 && !v.disablePictureInPicture);
+      if (!vids.length) return 'none';
+      vids.sort((a, b) => b.clientWidth * b.clientHeight - a.clientWidth * a.clientHeight);
+      await vids[0].requestPictureInPicture();
+      return 'open';
+    })()`, true);
+    if (r === 'none') dialog.showMessageBox(w.win, { type: 'info', message: 'No video to pop out', detail: 'Start a video on this page, then choose Picture in picture.', buttons: ['OK'] });
+  } catch {}
+}
+async function screenshot(w) {
+  const wc = w.activeWc();
+  if (!wc) return;
+  const img = await wc.capturePage();
+  clipboard.writeImage(img);
+  const t = w.activeTab();
+  const name = `Lantern screenshot ${new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-')}.png`;
+  const file = uniquePath(w.ctx.settings.downloadsDir || app.getPath('downloads'), name);
+  fs.writeFileSync(file, img.toPNG());
+  const { response } = await dialog.showMessageBox(w.win, { type: 'info', message: 'Screenshot saved', detail: `Copied to the clipboard and saved to ${file}${t ? `\n\n${tabTitle(t)}` : ''}`, buttons: ['OK', IS_MAC ? 'Show in Finder' : 'Show in folder'] });
+  if (response === 1) shell.showItemInFolder(file);
+}
+
+// ---------- site apps: a site in its own window, without tabs or a toolbar ----------
+function installApp(w) {
+  const t = w.activeTab();
+  if (!t || !/^https?:/.test(t.url)) return;
+  const ctx = w.ctx;
+  const host = hostOf(t.url).replace(/^www\./, '');
+  const a = { id: crypto.randomBytes(5).toString('hex'), name: (t.title || host).replace(/\s+[-|–—·:]\s+.*$/, '').slice(0, 40) || host, url: t.url, icon: /^(https:|data:image\/)/.test(t.favicon || '') ? t.favicon : '', added: Date.now() };
+  ctx.settings.apps = [...(ctx.settings.apps || []).filter((x) => hostOf(x.url) !== hostOf(a.url)), a].slice(-50);
+  ctx.saveSettings();
+  refreshAppMenu();
+  openAppWindow(ctx, a);
+  if (w.order.length > 1) w.closeTab(t.id); else w.activeWc()?.loadURL(NEWTAB_URL);
+}
+function openAppWindow(ctx, a) {
+  let origin = '';
+  try { origin = new URL(a.url).origin; } catch { return; }
+  const win = new BrowserWindow({
+    width: 1180, height: 800, minWidth: 360, minHeight: 300, title: a.name, autoHideMenuBar: true,
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#1b1d21' : '#ffffff',
+    webPreferences: { session: ctx.session, preload: path.join(__dirname, 'tab-preload.js'), sandbox: true, contextIsolation: true, nodeIntegration: false, spellcheck: true },
+  });
+  const wc = win.webContents;
+  wc.setWebRTCIPHandlingPolicy(ctx.settings.fingerprinting === 'strict' ? 'disable_non_proxied_udp' : 'default_public_interface_only');
+  const toBrowser = (url) => { const bw = ctx.focusedWindow() || ctx.windows()[0] || openWindow(ctx, { urls: [] }); setTimeout(() => { bw.createTab(url); bw.win.focus(); }, bw.order.length ? 0 : 300); };
+  // Links to other sites open in Lantern; the app window stays on its own site.
+  wc.setWindowOpenHandler(({ url }) => { if (/^https?:/.test(url)) toBrowser(url); return { action: 'deny' }; });
+  wc.on('will-navigate', (e, url) => { try { if (new URL(url).origin !== origin && /^https?:/.test(url)) { e.preventDefault(); toBrowser(url); } } catch {} });
+  wc.on('page-title-updated', (e, title) => { e.preventDefault(); win.setTitle(title || a.name); });
+  wc.on('context-menu', (_e, p) => {
+    Menu.buildFromTemplate([
+      ...(p.linkURL ? [{ label: 'Open link in Lantern', click: () => toBrowser(p.linkURL) }, { label: 'Copy link address', click: () => clipboard.writeText(p.linkURL) }, { type: 'separator' }] : []),
+      ...(p.isEditable ? [{ role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { type: 'separator' }] : p.selectionText ? [{ role: 'copy' }, { type: 'separator' }] : []),
+      { label: 'Back', enabled: wc.navigationHistory.canGoBack(), click: () => wc.navigationHistory.goBack() },
+      { label: 'Reload', click: () => wc.reload() },
+      { label: 'Open page in Lantern', click: () => toBrowser(wc.getURL()) },
+      { label: 'Copy page address', click: () => clipboard.writeText(wc.getURL()) },
+    ]).popup({ window: win });
+  });
+  wc.on('before-input-event', (e, input) => {
+    const mod = IS_MAC ? input.meta : input.control;
+    if (input.type !== 'keyDown' || !mod) return;
+    const k = input.key.toLowerCase();
+    if (k === 'r') { e.preventDefault(); wc.reload(); }
+    if (k === '[') { e.preventDefault(); wc.navigationHistory.goBack(); }
+    if (k === ']') { e.preventDefault(); wc.navigationHistory.goForward(); }
+    if (k === 'l') { e.preventDefault(); toBrowser(wc.getURL()); }
+  });
+  wc.loadURL(a.url);
+  return win;
+}
+function appsMenu(w) {
+  const apps = w.ctx.settings.apps || [];
+  const t = w.activeTab();
+  const web = !!(t && /^https?:/.test(t.url));
+  return [
+    ...apps.map((a) => ({ label: a.name, click: () => openAppWindow(w.ctx, a) })),
+    ...(apps.length ? [{ type: 'separator' }] : []),
+    { label: web ? `Install ${hostOf(t.url).replace(/^www\./, '')} as an app…` : 'Install this site as an app…', enabled: web && !w.ctx.isPrivate, click: () => installApp(w) },
+    { label: 'Manage apps', click: () => openSettings(w, 'import') },
+  ];
+}
+
+function tabLayoutMenu(w) {
+  const s = w.ctx.settings;
+  const vertical = s.tabLayout === 'vertical';
+  return [
+    { label: 'Vertical tabs', type: 'checkbox', checked: vertical, accelerator: 'CmdOrCtrl+Shift+E', click: () => toggleTabLayout(w.ctx) },
+    { label: 'Sidebar on the right', type: 'checkbox', checked: s.tabSide === 'right', enabled: vertical, click: () => setTabSetting(w.ctx, 'tabSide', s.tabSide === 'right' ? 'left' : 'right') },
+    { label: 'Collapse sidebar', type: 'checkbox', checked: !!s.tabsCollapsed, enabled: vertical, click: () => setTabSetting(w.ctx, 'tabsCollapsed', !s.tabsCollapsed) },
+    { label: 'Compact mode', type: 'checkbox', checked: !!s.compactMode, click: () => setTabSetting(w.ctx, 'compactMode', !s.compactMode) },
+    { type: 'separator' },
+    w.split ? { label: 'Close split view', accelerator: 'CmdOrCtrl+Alt+S', click: () => w.closeSplit() } : { label: 'Split view with a new tab', accelerator: 'CmdOrCtrl+Alt+S', click: () => w.splitNew() },
+    ...(w.split ? [{ label: 'Swap sides', click: () => w.swapSplit() }] : []),
+    { label: 'Add current tab to a new group', click: () => { const g = w.addToGroup(w.activeId); if (g) w.send('group-rename', g.id); } },
+    { type: 'separator' },
+    { label: 'Ctrl+Tab goes to the last-used tab', type: 'checkbox', checked: !!s.mruTabSwitching, click: () => setTabSetting(w.ctx, 'mruTabSwitching', !s.mruTabSwitching) },
+  ];
+}
+
 function showMainMenu(w, x, y) {
   const ctx = w.ctx;
   const wc = w.activeWc();
@@ -1313,7 +1754,12 @@ function showMainMenu(w, x, y) {
   const template = [
     { label: 'New tab', accelerator: 'CmdOrCtrl+T', click: () => w.createTab() },
     { label: 'New window', accelerator: 'CmdOrCtrl+N', click: () => openWindow(ctx.isPrivate ? ctx.parent : ctx) },
-    { label: 'New private window', accelerator: 'CmdOrCtrl+Shift+N', click: () => openPrivateWindow(ctx) },
+    { label: 'New incognito window', accelerator: 'CmdOrCtrl+Shift+N', click: () => openPrivateWindow(ctx) },
+    { type: 'separator' },
+    { label: 'Search open tabs', accelerator: 'CmdOrCtrl+Shift+Space', click: () => w.send('focus-omnibox-text', '@tabs ') },
+    { label: 'Picture in picture', enabled: web, click: () => pictureInPicture(w) },
+    { label: 'Take a screenshot', enabled: !!wc, click: () => screenshot(w) },
+    { label: 'Copy clean link', enabled: web, click: () => { const c = core.cleanUrl(t.url).url; clipboard.writeText(c); } },
     { type: 'separator' },
     { label: 'AI assistant', accelerator: 'CmdOrCtrl+Shift+A', click: () => w.openPanel('ai') },
     { label: 'Reading mode', enabled: web, click: () => w.openPanel('reader') },
@@ -1326,6 +1772,8 @@ function showMainMenu(w, x, y) {
       { label: 'Bookmark manager', click: () => openLibrary(w, 'bookmarks') },
     ] },
     { label: 'Downloads', accelerator: IS_MAC ? 'Cmd+Shift+J' : 'Ctrl+J', click: () => openLibrary(w, 'downloads') },
+    { label: 'Tabs and layout', submenu: tabLayoutMenu(w) },
+    { label: 'Apps', submenu: appsMenu(w) },
     { label: 'Reopen closed tab', accelerator: 'CmdOrCtrl+Shift+T', enabled: w.closed.length > 0, click: () => w.reopenClosed() },
     { label: 'Extensions', enabled: !ctx.isPrivate, submenu: [
       { label: 'Manage extensions', click: () => openSettings(w, 'extensions') },
@@ -1430,8 +1878,44 @@ function handleInternal(channel, fn) {
   ipcMain.handle(channel, (event, ...args) => fn(internalContext(event), event, ...args));
 }
 
-function fetchImpl() {
-  return USE_FIXTURES ? require('../test/fixture-fetch').fixtureFetch : (u, o) => fetchSession.fetch(u, o);
+// ---------- Lantern services: every request Lantern itself makes, and switches to turn them off ----------
+// Websites you open are not in here; this is only Lantern's own background traffic.
+const STARTED_AT = Date.now();
+const serviceLog = [];
+let servicesCache = null;
+function servicesFile() { return path.join(app.getPath('userData'), 'services.json'); }
+function getServices() {
+  if (!servicesCache) servicesCache = { trackerLists: true, threatLists: true, blockAnnoyances: true, secureDns: 'automatic', secureDnsUrl: '', ...readJson(servicesFile(), {}) };
+  return servicesCache;
+}
+function logService(service, url) {
+  serviceLog.push({ at: Date.now(), service, host: hostOf(String(url)) });
+  if (serviceLog.length > 400) serviceLog.shift();
+}
+// DNS over HTTPS: the addresses you look up are encrypted instead of sent in the clear.
+const DOH = {
+  cloudflare: 'https://chrome.cloudflare-dns.com/dns-query',
+  quad9: 'https://dns.quad9.net/dns-query',
+  google: 'https://dns.google/dns-query',
+  mullvad: 'https://dns.mullvad.net/dns-query',
+  adguard: 'https://dns.adguard-dns.com/dns-query',
+};
+function applySecureDns() {
+  const sv = getServices();
+  try {
+    if (sv.secureDns === 'off') app.configureHostResolver({ secureDnsMode: 'off' });
+    else if (sv.secureDns === 'automatic') app.configureHostResolver({ secureDnsMode: 'automatic' });
+    else {
+      const url = sv.secureDns === 'custom' ? sv.secureDnsUrl : DOH[sv.secureDns];
+      if (url) app.configureHostResolver({ secureDnsMode: 'secure', secureDnsServers: [url] });
+    }
+  } catch (err) { console.error('Secure DNS:', err.message); }
+}
+function serviceFetch(service) {
+  return (u, o) => { logService(service, u); return fetchSession.fetch(u, o); };
+}
+function fetchImpl(service = 'Lantern Search') {
+  return USE_FIXTURES ? require('../test/fixture-fetch').fixtureFetch : serviceFetch(service);
 }
 
 handleInternal('lantern:search', (_ctx, _e, query, next, seen) => {
@@ -1481,6 +1965,10 @@ handleInternal('lantern:set-setting', (ctx, _e, key, value) => {
   if (key === 'rememberSearches' && !r.value) ctx.clearSearches();
   ctx.saveSettings();
   if (key === 'bookmarksBar' && !ctx.isPrivate) for (const c of contexts.values()) if (c.parent === ctx) { c.settings.bookmarksBar = r.value; c.saveSettings(); }
+  if (['tabLayout', 'tabSide', 'tabsCollapsed', 'tabsWidth', 'compactMode', 'showSplitButton', 'toolbarShield'].includes(key)) {
+    for (const c of contexts.values()) if (c.parent === ctx) c.settings[key] = r.value;
+    for (const x of windows) if (x.ctx === ctx || x.ctx.parent === ctx) { x.layout(); x.broadcast(); }
+  }
   refreshAppMenu();
   return ctx.settings;
 });
@@ -1625,7 +2113,7 @@ function windowOfSender(sender) {
 }
 function aiFetch() {
   if (process.env.LANTERN_AI_MOCK && !app.isPackaged) { try { return require('../test/ai-mock').mockFetch; } catch {} }
-  return (u, o) => fetchSession.fetch(u, o);
+  return serviceFetch('AI assistant');
 }
 const aiRuns = new Map(); // request id -> AbortController
 
@@ -1768,14 +2256,85 @@ handleInternal('lantern:panel-open', (_ctx, event, mode, extra) => {
   w.openPanel(m, extra && typeof extra === 'object' ? { view: extra.view === 'keys' ? 'keys' : undefined } : {});
   return true;
 });
+// ---------- 1.6: bangs, services, import, apps, shields ----------
+handleInternal('lantern:bangs-list', () => core.bangs.list());
+handleInternal('lantern:services', () => ({ ...getServices(), startedAt: STARTED_AT, log: serviceLog.slice(-150).reverse() }));
+handleInternal('lantern:services-set', (_ctx, _e, key, on) => {
+  const sv = getServices();
+  if (key === 'secureDns') {
+    if (!['off', 'automatic', 'custom', ...Object.keys(DOH)].includes(on)) throw new Error('Unknown DNS provider');
+    sv.secureDns = on;
+  } else if (key === 'secureDnsUrl') {
+    const u = String(on || '').trim();
+    if (u && !/^https:\/\/[a-z0-9.-]+(:\d+)?\/\S*$/i.test(u)) throw new Error('Use an https:// DNS-over-HTTPS address');
+    sv.secureDnsUrl = u;
+  } else if (['trackerLists', 'threatLists', 'blockAnnoyances'].includes(key)) {
+    sv[key] = !!on;
+  } else throw new Error('Unknown service');
+  try { writeAtomic(servicesFile(), JSON.stringify(sv)); } catch {}
+  if (key === 'trackerLists' && on && !blocker) loadBlocker();
+  if (key === 'blockAnnoyances') loadBlocker();
+  if (key === 'secureDns' || key === 'secureDnsUrl') applySecureDns();
+  if (key === 'threatLists' && on && threats && !USE_FIXTURES) threats.refresh().catch(() => {});
+  return { ...sv };
+});
+handleInternal('lantern:import-sources', () => importer.listSources().map((x) => ({ id: x.id, browser: x.browser, profile: x.profile, bookmarks: x.bookmarks, history: x.history })));
+handleInternal('lantern:import', (ctx, _e, id, what) => {
+  if (ctx.isPrivate) throw new Error('Open a normal window to import.');
+  const src = importer.listSources().find((x) => x.id === String(id));
+  if (!src) throw new Error('That browser profile is no longer there.');
+  const data = importer.read(src, { bookmarks: !!(what && what.bookmarks), history: !!(what && what.history) });
+  const bookmarks = data.bookmarks.length ? ctx.library.importBookmarks(data.bookmarks.map((b) => ({ ...b, folder: b.folder ? `${src.browser} / ${b.folder}` : src.browser }))) : 0;
+  const history = data.history.length ? ctx.library.importHistory(data.history) : 0;
+  broadcastAll();
+  return { bookmarks, history, found: { bookmarks: data.bookmarks.length, history: data.history.length } };
+});
+handleInternal('lantern:import-html', async (ctx, event) => {
+  const win = BrowserWindow.fromWebContents(event.sender) || BrowserWindow.getFocusedWindow();
+  const file = process.env.LANTERN_TEST_IMPORT_HTML || (await (async () => {
+    const r = await dialog.showOpenDialog(win, { title: 'Import bookmarks', properties: ['openFile'], filters: [{ name: 'Bookmarks file', extensions: ['html', 'htm'] }] });
+    return r.canceled ? null : r.filePaths[0];
+  })());
+  if (!file) return null;
+  const list = importer.parseBookmarksHtml(fs.readFileSync(file, 'utf8'));
+  const n = ctx.library.importBookmarks(list);
+  broadcastAll();
+  return { bookmarks: n, found: list.length, file: path.basename(file) };
+});
+handleInternal('lantern:export-html', async (ctx, event) => {
+  const win = BrowserWindow.fromWebContents(event.sender) || BrowserWindow.getFocusedWindow();
+  const r = await dialog.showSaveDialog(win, { title: 'Export bookmarks', defaultPath: path.join(app.getPath('downloads'), 'lantern-bookmarks.html'), filters: [{ name: 'Bookmarks file', extensions: ['html'] }] });
+  if (r.canceled || !r.filePath) return null;
+  fs.writeFileSync(r.filePath, ctx.library.exportHtml());
+  return { file: r.filePath, count: ctx.library.listBookmarks().length };
+});
+handleInternal('lantern:apps', (ctx) => ctx.settings.apps || []);
+handleInternal('lantern:app-open', (ctx, _e, id) => { const a = (ctx.settings.apps || []).find((x) => x.id === id); if (a) openAppWindow(ctx, a); return !!a; });
+handleInternal('lantern:app-remove', (ctx, _e, id) => {
+  ctx.settings.apps = (ctx.settings.apps || []).filter((x) => x.id !== id);
+  ctx.saveSettings();
+  refreshAppMenu();
+  return ctx.settings.apps;
+});
+handleInternal('lantern:shields-reset', (ctx, _e, site) => {
+  if (site) delete ctx.settings.siteShields[String(site)]; else ctx.settings.siteShields = {};
+  ctx.saveSettings();
+  broadcastAll();
+  return ctx.settings.siteShields;
+});
+
 handleInternal('lantern:restore-session', (ctx, event) => {
   const s = ctx.lastSession();
   if (!s) return false;
   const found = findTabByWebContentsId(event.sender.id, true);
   s.windows.forEach((sw, i) => {
     const urls = sw.tabs.map((t) => t.url);
-    if (i === 0 && found) sw.tabs.forEach((t) => found.win.createTab(t.url, { activate: false, pinned: !!t.pinned }));
-    else openWindow(ctx, { urls, pinned: sw.tabs.map((t) => !!t.pinned) });
+    if (i === 0 && found) {
+      const gids = (sw.groups || []).map((g) => found.win.makeGroup(g.name, g.color, g.collapsed).id);
+      sw.tabs.forEach((t) => { const nt = found.win.createTab(t.url, { activate: false, pinned: !!t.pinned }); if (Number.isInteger(t.group) && gids[t.group]) nt.group = gids[t.group]; });
+      found.win.normalizeGroups();
+      found.win.broadcast();
+    } else openWindow(ctx, { urls, pinned: sw.tabs.map((t) => !!t.pinned), groups: sw.groups || [], tabGroups: sw.tabs.map((t) => t.group) });
   });
   ctx.crashed = false;
   return true;
@@ -1799,6 +2358,21 @@ handleInternal('lantern:safety-status', async (ctx, _e, refresh) => {
   };
 });
 handleInternal('lantern:dismiss-restore', (ctx) => { ctx.crashed = false; return true; });
+
+// ---------- fingerprint protection: the seed a tab's page gets (sync, before page scripts run) ----------
+ipcMain.on('lantern:fp', (event, url) => {
+  try {
+    const found = findTabByWebContentsId(event.sender.id, true);
+    const ctx = found ? found.win.ctx : [...contexts.values()].find((c) => c.session === event.sender.session);
+    if (!ctx || !/^https?:/.test(String(url))) { event.returnValue = null; return; }
+    const site = siteOfUrl(String(url));
+    const sh = ctx.shieldsForSite(site);
+    if (!sh.fp) { event.returnValue = { on: false }; return; }
+    // Same answer for a site for the whole session, different across sites and sessions.
+    const h = crypto.createHash('sha256').update(ctx.fpSalt).update(site).digest();
+    event.returnValue = { on: true, seed: h.readUInt32LE(0), strict: ctx.settings.fingerprinting === 'strict' };
+  } catch { event.returnValue = null; }
+});
 
 // ---------- browser frame (tab strip + toolbar) IPC ----------
 ipcMain.handle('ui-suggest', (event, text, remote) => {
@@ -1867,17 +2441,100 @@ ipcMain.on('ui', (event, msg) => {
       break;
     }
     case 'ready': w.broadcast(); break;
+    // split view
+    case 'split-new': w.splitNew(); break;
+    case 'split-close': w.closeSplit(); break;
+    case 'split-swap': w.swapSplit(); break;
+    case 'split-with': w.splitWith(Number(msg.id), Number(msg.with) || w.activeId); break;
+    case 'split-ratio': if (w.split) { w.split.ratio = Math.max(0.2, Math.min(0.8, Number(msg.ratio) || 0.5)); w.layout(); } break;
+    // tab groups
+    case 'group-menu': w.showGroupMenu(Number(msg.id), msg.x, msg.y); break;
+    case 'group-toggle': { const g = w.groups.get(Number(msg.id)); if (g) { g.collapsed = !g.collapsed; if (g.collapsed && w.tabs.get(w.activeId)?.group === g.id) { const next = w.order.find((x) => w.tabs.get(x).group !== g.id); if (next) w.activateTab(next); else g.collapsed = false; } w.broadcast(); } break; }
+    case 'group-rename': { const g = w.groups.get(Number(msg.id)); if (g) { g.name = String(msg.name || '').slice(0, 40); w.broadcast(); } break; }
+    case 'group-move': {
+      // dropping a tab onto a group chip puts it in that group
+      if (msg.group) w.addToGroup(Number(msg.id), Number(msg.group));
+      else w.removeFromGroup(Number(msg.id));
+      break;
+    }
+    // vertical tabs
+    case 'sidebar-toggle': setTabSetting(w.ctx, 'tabsCollapsed', !w.ctx.settings.tabsCollapsed); break;
+    case 'sidebar-width': if (w.dragging) { w.ctx.settings.tabsWidth = Math.max(160, Math.min(400, Math.round(Number(msg.width) || 220))); w.layout(); } break;
+    case 'drag-start': w.startDrag(); break;
+    case 'drag-end': {
+      w.endDrag();
+      if (msg.kind === 'sidebar') setTabSetting(w.ctx, 'tabsWidth', w.ctx.settings.tabsWidth);
+      break;
+    }
+    case 'layout-toggle': toggleTabLayout(w.ctx); break;
+    case 'shield-menu': showShieldMenu(w, msg.x, msg.y); break;
   }
 });
+
+// Saves a tab or layout setting through the Rust validator and re-lays out every window of the profile.
+function setTabSetting(ctx, key, value) {
+  const r = core.settings.validate(key, value);
+  if (!r.ok) return false;
+  ctx.settings[key] = r.value;
+  ctx.saveSettings();
+  for (const c of contexts.values()) if (c.parent === ctx) { c.settings[key] = r.value; }
+  for (const x of windows) if (x.ctx === ctx || x.ctx.parent === ctx) { x.layout(); x.broadcast(); }
+  scheduleMenuRefresh();
+  return true;
+}
+function toggleTabLayout(ctx) {
+  setTabSetting(ctx, 'tabLayout', ctx.settings.tabLayout === 'vertical' ? 'horizontal' : 'vertical');
+}
+
+// Shields for the site in the active tab: on/off, fingerprinting, and what was blocked.
+function showShieldMenu(w, x, y) {
+  const t = w.activeTab();
+  if (!t || !/^https?:/.test(t.url)) return;
+  const ctx = w.ctx;
+  const site = siteOfUrl(t.url);
+  const sh = ctx.shieldsFor(t.url);
+  const fpGlobal = (ctx.settings.fingerprinting || 'standard') !== 'off';
+  const save = (patch) => {
+    const all = { ...(ctx.settings.siteShields || {}) };
+    const next = { ...(all[site] || {}), ...patch };
+    for (const k of Object.keys(next)) if (next[k] === undefined) delete next[k];
+    if (Object.keys(next).length) all[site] = next; else delete all[site];
+    const r = core.settings.validate('siteShields', all);
+    if (!r.ok) return;
+    ctx.settings.siteShields = r.value;
+    ctx.saveSettings();
+    if (t.view && !t.view.webContents.isDestroyed()) t.view.webContents.reload();
+    broadcastAll();
+  };
+  const template = [
+    { label: `Shields for ${site}`, enabled: false },
+    { label: sh.on ? 'Shields are up' : 'Shields are down', type: 'checkbox', checked: sh.on, click: () => save({ off: sh.on ? true : undefined }) },
+    { label: `${t.blocked || 0} tracker${t.blocked === 1 ? '' : 's'} and ads blocked on this page`, enabled: false },
+    { type: 'separator' },
+    { label: 'Block trackers and ads', type: 'checkbox', checked: sh.on && ctx.settings.blockTrackers !== false, enabled: sh.on, click: () => openSettings(w, 'privacy') },
+    { label: 'Block fingerprinting', type: 'checkbox', checked: sh.on && sh.fp, enabled: sh.on && fpGlobal, click: () => save({ fp: sh.fp ? false : undefined }) },
+    { label: 'Block third-party cookies', type: 'checkbox', checked: sh.on && sh.cookies, enabled: sh.on && ctx.settings.blockThirdPartyCookies !== false, click: () => save({ cookies: sh.cookies ? false : undefined }) },
+    { type: 'separator' },
+    { label: `${ctx.blockedTotal} blocked this session`, enabled: false },
+    { label: 'Shields settings…', click: () => openSettings(w, 'privacy') },
+  ];
+  Menu.buildFromTemplate(template).popup({ window: w.win, x: Math.round(x), y: Math.round(y) });
+}
 
 // ---------- startup ----------
 async function loadBlocker() {
   if (USE_FIXTURES) return;
   try {
     const { ElectronBlocker } = require('@ghostery/adblocker-electron');
-    const cache = path.join(app.getPath('userData'), 'blocklist.bin');
+    const full = getServices().blockAnnoyances !== false;
+    const cache = path.join(app.getPath('userData'), full ? 'blocklist-full.bin' : 'blocklist.bin');
+    if (!getServices().trackerLists) {
+      // List updates are off: use the copy on disk if there is one, and never go online for it.
+      if (fs.existsSync(cache)) blocker = ElectronBlocker.deserialize(new Uint8Array(await fs.promises.readFile(cache)));
+      return;
+    }
     try { if (Date.now() - fs.statSync(cache).mtimeMs > 7 * 864e5) fs.unlinkSync(cache); } catch {}
-    blocker = await ElectronBlocker.fromPrebuiltAdsAndTracking((u, o) => net.fetch(u, o), {
+    blocker = await ElectronBlocker[full ? 'fromPrebuiltFull' : 'fromPrebuiltAdsAndTracking']((u, o) => { logService('Tracker list update', u); return net.fetch(u, o); }, {
       path: cache, read: fs.promises.readFile, write: fs.promises.writeFile,
     });
   } catch (err) {
@@ -1897,7 +2554,7 @@ function startupWindows(ctx) {
     const last = ctx.lastSession();
     if (last && last.windows.length) {
       ctx.crashed = false;
-      for (const w of last.windows) openWindow(ctx, { urls: w.tabs.map((t) => t.url), pinned: w.tabs.map((t) => !!t.pinned) });
+      for (const w of last.windows) openWindow(ctx, { urls: w.tabs.map((t) => t.url), pinned: w.tabs.map((t) => !!t.pinned), groups: w.groups || [], tabGroups: w.tabs.map((t) => t.group) });
       return;
     }
   }
@@ -2022,20 +2679,21 @@ app.whenReady().then(async () => {
   if (TEST_SHOT_DIR && process.env.LANTERN_TEST_SCRIPT && !app.isPackaged) {
     // Development-only scripted tests (never in a packaged build).
     [...windows][0].win.webContents.once('did-finish-load', () => setTimeout(() => {
-      require(path.resolve(process.env.LANTERN_TEST_SCRIPT))({ app, windows, contexts, core, profiles, openPrivateWindow, openLibrary, setBookmarksBar, showAiMenu, showMainMenu, refreshAppMenu, TEST_SHOT_DIR, INTERNAL })
+      require(path.resolve(process.env.LANTERN_TEST_SCRIPT))({ app, windows, contexts, core, profiles, openPrivateWindow, openLibrary, setBookmarksBar, showAiMenu, showMainMenu, refreshAppMenu, TEST_SHOT_DIR, INTERNAL, setTabSetting, toggleTabLayout, getServices, serviceLog, importer, openAppWindow, tabLayoutMenu, appsMenu })
         .catch((err) => fs.appendFileSync(path.join(TEST_SHOT_DIR, 'console.txt'), `[test] FAILED ${err.stack}\n`))
         .finally(() => app.quit());
     }, 300));
   } else if (TEST_SHOT_DIR) [...windows][0].win.webContents.once('did-finish-load', () => setTimeout(runScreenshotTest, 300));
+  applySecureDns();
   loadBlocker();
-  threats = new ThreatLists(path.join(app.getPath('userData'), 'Safety'), (u) => fetchSession.fetch(u));
+  threats = new ThreatLists(path.join(app.getPath('userData'), 'Safety'), (u) => { logService('Threat list update', u); return fetchSession.fetch(u); });
   if (USE_FIXTURES && process.env.LANTERN_TEST_THREATS) {
     threats.sets.phishing = parseList(fs.readFileSync(process.env.LANTERN_TEST_THREATS, 'utf8'));
     threats.updatedAt = Date.now();
   } else {
     threats.loadCached();
-    threats.refresh().catch(() => {});
-    setInterval(() => threats.refresh().catch(() => {}), 60 * 60_000);
+    if (getServices().threatLists) threats.refresh().catch(() => {});
+    setInterval(() => { if (getServices().threatLists) threats.refresh().catch(() => {}); }, 60 * 60_000);
   }
 
   setInterval(() => { for (const c of contexts.values()) c.saveSession(); }, SAVE_EVERY_MS);

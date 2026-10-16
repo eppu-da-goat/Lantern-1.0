@@ -63,6 +63,18 @@ if (location.protocol === 'lantern:' && location.host === 'app') {
     panelOpen: call('lantern:panel-open'),
     onPanel: (fn) => ipcRenderer.on('lantern:panel', (_e, m) => fn(m)),
     onProgress: (fn) => ipcRenderer.on('lantern:progress', (_e, step) => fn(step)),
+    // 1.6
+    bangsList: call('lantern:bangs-list'),
+    services: call('lantern:services'),
+    setService: call('lantern:services-set'),
+    importSources: call('lantern:import-sources'),
+    importBrowser: call('lantern:import'),
+    importHtml: call('lantern:import-html'),
+    exportHtml: call('lantern:export-html'),
+    apps: call('lantern:apps'),
+    openApp: call('lantern:app-open'),
+    removeApp: call('lantern:app-remove'),
+    resetShields: call('lantern:shields-reset'),
   });
 }
 
@@ -104,4 +116,94 @@ if ((location.protocol === 'https:' || location.protocol === 'http:') && context
       },
     });
   } catch {}
+}
+
+// Fingerprint protection. Sites that read your canvas, audio stack or hardware to build a
+// fingerprint get slightly different answers per site and per session, so the readings can't
+// follow you around. Lantern decides per site (Shields) and passes a seed; nothing leaves the device.
+if ((location.protocol === 'https:' || location.protocol === 'http:') && contextBridge.executeInMainWorld) {
+  let cfg = null;
+  try { cfg = ipcRenderer.sendSync('lantern:fp', location.href); } catch {}
+  if (cfg && cfg.on) {
+    try {
+      contextBridge.executeInMainWorld({
+        args: [cfg],
+        func: (conf) => {
+          // A small generator seeded per site; every reading restarts it so repeated reads agree.
+          const gen = (seed) => { let st = seed >>> 0 || 1; return () => { st ^= st << 13; st >>>= 0; st ^= st >>> 17; st ^= st << 5; st >>>= 0; return st / 4294967296; }; };
+          const rand = gen(conf.seed);
+          // Wrapping with a Proxy keeps Function.prototype.toString answering "[native code]".
+          const wrap = (obj, name, make) => {
+            const orig = obj && obj[name];
+            if (typeof orig !== 'function') return;
+            const handler = make(orig);
+            try { Object.defineProperty(obj, name, { value: new Proxy(orig, { apply: (target, self, args) => handler(target, self, args) }), writable: true, configurable: true }); } catch {}
+          };
+          const noisePixels = (data) => {
+            // Nudge a few hundred pixels by one step: invisible, but it changes the fingerprint hash.
+            const r = gen(conf.seed ^ data.length);
+            const n = Math.min(data.length / 4, 400);
+            for (let i = 0; i < n; i++) {
+              const p = Math.floor(r() * (data.length / 4)) * 4 + Math.floor(r() * 3);
+              data[p] = data[p] ^ 1;
+            }
+          };
+          const C2D = window.CanvasRenderingContext2D && CanvasRenderingContext2D.prototype;
+          wrap(C2D, 'getImageData', (orig) => (target, self, args) => {
+            const img = Reflect.apply(target, self, args);
+            try { noisePixels(img.data); } catch {}
+            return img;
+          });
+          const noisyCopy = (canvas) => {
+            if (!canvas.width || !canvas.height || canvas.width * canvas.height > 4096 * 4096) return canvas;
+            try {
+              const copy = document.createElement('canvas');
+              copy.width = canvas.width; copy.height = canvas.height;
+              const cx = copy.getContext('2d');
+              cx.drawImage(canvas, 0, 0);
+              const img = cx.getImageData(0, 0, copy.width, copy.height); // already noisy through the wrapper
+              cx.putImageData(img, 0, 0);
+              return copy;
+            } catch { return canvas; }
+          };
+          const CP = window.HTMLCanvasElement && HTMLCanvasElement.prototype;
+          wrap(CP, 'toDataURL', () => (target, self, args) => Reflect.apply(target, noisyCopy(self), args));
+          wrap(CP, 'toBlob', () => (target, self, args) => Reflect.apply(target, noisyCopy(self), args));
+          // Audio fingerprinting reads tiny float differences; add differences of the same size.
+          const AB = window.AudioBuffer && AudioBuffer.prototype;
+          wrap(AB, 'getChannelData', () => (target, self, args) => {
+            const data = Reflect.apply(target, self, args);
+            try { if (!self.__lanternFp) { self.__lanternFp = true; const r = gen(conf.seed ^ data.length); for (let i = 0; i < data.length; i += 97) data[i] += (r() - 0.5) * 1e-7; } } catch {}
+            return data;
+          });
+          const AN = window.AnalyserNode && AnalyserNode.prototype;
+          wrap(AN, 'getFloatFrequencyData', () => (target, self, args) => {
+            const r = Reflect.apply(target, self, args);
+            try { const a = args[0]; const r = gen(conf.seed ^ a.length); for (let i = 0; i < a.length; i += 7) a[i] += (r() - 0.5) * 1e-4; } catch {}
+            return r;
+          });
+          // Hardware details: a plausible value that differs per site.
+          const cores = conf.strict ? 4 : Math.max(2, Math.min(navigator.hardwareConcurrency || 4, 2 + Math.floor(rand() * 7)));
+          try { Object.defineProperty(Navigator.prototype, 'hardwareConcurrency', { get: () => cores, configurable: true }); } catch {}
+          try { if ('deviceMemory' in navigator) Object.defineProperty(Navigator.prototype, 'deviceMemory', { get: () => 8, configurable: true }); } catch {}
+          // Battery level and charge times can identify a device for a while; answer with a full, charging battery.
+          if (conf.strict && navigator.getBattery) {
+            const fake = { charging: true, chargingTime: 0, dischargingTime: Infinity, level: 1, addEventListener() {}, removeEventListener() {}, onchargingchange: null, onlevelchange: null };
+            wrap(Navigator.prototype, 'getBattery', () => () => Promise.resolve(fake));
+          }
+          // Graphics card name: generic everywhere in strict mode.
+          if (conf.strict) {
+            for (const G of [window.WebGLRenderingContext, window.WebGL2RenderingContext]) {
+              if (!G) continue;
+              wrap(G.prototype, 'getParameter', () => (target, self, args) => {
+                if (args[0] === 0x9245) return 'Google Inc.';
+                if (args[0] === 0x9246) return 'ANGLE (Generic, Lantern)';
+                return Reflect.apply(target, self, args);
+              });
+            }
+          }
+        },
+      });
+    } catch {}
+  }
 }

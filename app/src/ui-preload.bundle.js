@@ -436,5 +436,7 @@ contextBridge.exposeInMainWorld("lanternUI", {
   onFindResult: (fn) => ipcRenderer.on("find-result", (_e, r) => fn(r)),
   suggest: (text, remote) => ipcRenderer.invoke("ui-suggest", text, remote),
   onOmniboxDone: (fn) => ipcRenderer.on("omnibox-done", () => fn()),
-  onSuggestRefresh: (fn) => ipcRenderer.on("suggest-refresh", () => fn())
+  onSuggestRefresh: (fn) => ipcRenderer.on("suggest-refresh", () => fn()),
+  onGroupRename: (fn) => ipcRenderer.on("group-rename", (_e, id) => fn(id)),
+  onOmniboxText: (fn) => ipcRenderer.on("focus-omnibox-text", (_e, t) => fn(t))
 });

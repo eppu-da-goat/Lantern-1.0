@@ -1,5 +1,34 @@
 # Changelog
 
+## 1.6.0 (2026-10-16)
+
+Ideas from Helium and Brave, written fresh for Lantern.
+
+**Tabs and layout**
+- **Vertical tabs**: a sidebar on the left or right that you can resize or collapse to icons (⇧⌘E). Pinned tabs sit on top.
+- **Split view**: two tabs side by side, with a draggable divider and a swap button. Open it with the toolbar button or ⌥⌘S, Shift+click a tab, or right-click a tab or link.
+- **Tab groups**: named, coloured and collapsible. Drag tabs onto a group to add them. Groups are kept when Lantern restores your session.
+- **Compact mode**: smaller tabs and toolbar.
+- **Most-recently-used switching**: an option to make Ctrl+Tab go to the tab you used last.
+- **Search your open tabs**: type `@tabs` in the address bar or press ⇧⌘Space. `@history` and `@bookmarks` work too.
+
+**Search**
+- **!bangs**: 185 built in, such as `!w`, `!yt` and `!gh`. Put the bang at the start or end, as in `!w moon` or `moon !w`, and add your own. They're resolved by the Rust core on your device.
+
+**Privacy and the ad blocker**
+- **Shields per site**: click the shield in the address bar to turn blocking off for a site, or to allow its fingerprinting or cookies.
+- **Ad blocker**: hides the empty boxes ads leave behind, and can also hide cookie banners and other annoyances.
+- **Fingerprint protection**: standard or strict. Canvas, audio and hardware readings differ from site to site. Strict also hides your graphics card and battery, and stops WebRTC from leaking your network address.
+- **Clean links**: tracking parameters (utm_*, fbclid, gclid and others) are removed before a page loads, using a new Rust module. **Copy clean link** is in the right-click menu.
+- **Secure DNS (DNS over HTTPS)**: Cloudflare, Quad9, Google, Mullvad, AdGuard or your own server.
+- **Lantern services**: a log of every request Lantern makes on its own, with switches to stop the list updates.
+- **Incognito windows**: what were private windows, now with an Incognito label (⇧⌘N).
+
+**More**
+- **Import**: bookmarks and history from Chrome, Brave, Edge, Helium, Arc, Vivaldi, Opera and Firefox. Bookmark files (Raindrop.io and every browser) can be imported and exported.
+- **Site apps**: run any site in its own window (⋮ → Apps).
+- **Picture in picture and screenshots**: both in the ⋮ menu.
+
 ## 1.5.1 (2026-10-16)
 
 **Fixed**

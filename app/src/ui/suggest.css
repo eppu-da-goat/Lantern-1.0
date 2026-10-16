@@ -36,3 +36,6 @@ body { padding: 10px; font: 14px/1.2 var(--font); color: var(--fg); user-select:
 .head { padding: 8px 14px 4px; font-size: 12px; font-weight: 600; color: var(--muted); letter-spacing: .02em; }
 .row.ai .ic { color: var(--accent, #e2700c); }
 .row.ai .tag { color: var(--accent, #e2700c); border-color: color-mix(in srgb, var(--accent, #e2700c) 40%, transparent); }
+.row.bang .ic { color: var(--accent, #e2700c); }
+.row.bang .ic svg { stroke-width: 2.6; }
+.row.bang .tag { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--accent, #e2700c); border-color: color-mix(in srgb, var(--accent, #e2700c) 40%, transparent); }

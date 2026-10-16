@@ -6,6 +6,8 @@ const { webContents, dialog, BrowserWindow } = require('electron');
 
 function hostOf(url) { try { return new URL(url).hostname; } catch { return ''; } }
 function siteOf(host) {
+  const h = String(host || '').toLowerCase();
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(h) || h.includes(':') || h.startsWith('[')) return h; // IP addresses are their own site
   const parts = String(host || '').toLowerCase().split('.').filter(Boolean);
   if (parts.length <= 2) return parts.join('.');
   const two = parts.slice(-2).join('.');
@@ -37,6 +39,10 @@ function setupPrivacy(ctx) {
     return !!top && siteOf(hostOf(details.url)) !== top;
   }
 
+  function cookiesBlockedFor(details) {
+    return !ctx.shieldsForSite || ctx.shieldsForSite(topSiteFor(details)).cookies;
+  }
+
   ses.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, (details, callback) => {
     const { url, resourceType } = details;
     const s = ctx.settings;
@@ -58,7 +64,13 @@ function setupPrivacy(ctx) {
       }
     }
     const blocker = ctx.getBlocker();
-    if (s.blockTrackers && blocker && /^https?:/.test(url)) {
+    const shields = ctx.shieldsForSite ? ctx.shieldsForSite(topSiteFor(details)) : { on: true, cookies: true };
+    // Tracking parameters (utm_*, fbclid, gclid…) come off the address before the page loads.
+    if (s.stripTracking !== false && shields.on && (resourceType === 'mainFrame' || resourceType === 'subFrame') && /^https?:/.test(url) && url.includes('?') && ctx.cleanUrl) {
+      const cleaned = ctx.cleanUrl(url);
+      if (cleaned && cleaned !== url) { ctx.onCleaned && ctx.onCleaned(details.webContentsId); return callback({ redirectURL: cleaned }); }
+    }
+    if (s.blockTrackers && shields.on && blocker && /^https?:/.test(url)) {
       return blocker.onBeforeRequest(details, (resp) => {
         if (resp.cancel || resp.redirectURL) ctx.onBlocked(details.webContentsId);
         callback(resp);
@@ -71,12 +83,12 @@ function setupPrivacy(ctx) {
     const headers = details.requestHeaders;
     addClientHints(headers, details.url);
     if (ctx.settings.sendGpc) { headers['Sec-GPC'] = '1'; headers.DNT = '1'; }
-    if (ctx.settings.blockThirdPartyCookies && isThirdParty(details)) delete headers.Cookie;
+    if (ctx.settings.blockThirdPartyCookies && isThirdParty(details) && cookiesBlockedFor(details)) delete headers.Cookie;
     callback({ requestHeaders: headers });
   });
 
   ses.webRequest.onHeadersReceived({ urls: ['<all_urls>'] }, (details, callback) => {
-    if (!ctx.settings.blockThirdPartyCookies || !isThirdParty(details) || !details.responseHeaders) return callback({});
+    if (!ctx.settings.blockThirdPartyCookies || !isThirdParty(details) || !details.responseHeaders || !cookiesBlockedFor(details)) return callback({});
     const headers = { ...details.responseHeaders };
     for (const k of Object.keys(headers)) if (k.toLowerCase() === 'set-cookie') delete headers[k];
     callback({ responseHeaders: headers });

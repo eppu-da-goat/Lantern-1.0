@@ -70,13 +70,49 @@ fn shortcuts(v: &Value) -> Result<Value, String> {
     Ok(Value::Array(out))
 }
 
+/// Per-site Shields: `{ "example.com": { "off": true, "fp": false } }`.
+fn site_shields(v: &Value) -> Result<Value, String> {
+    let map = v.as_object().ok_or("expected sites")?;
+    if map.len() > 5000 {
+        return Err("too many sites".into());
+    }
+    let mut out = serde_json::Map::new();
+    for (site, conf) in map {
+        let ok = !site.is_empty() && site.len() <= 253 && site.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.');
+        if !ok {
+            return Err(format!("\"{site}\" isn't a site name"));
+        }
+        let mut c = serde_json::Map::new();
+        for key in ["off", "fp", "cookies"] {
+            if let Some(b) = conf.get(key).and_then(Value::as_bool) {
+                c.insert(key.into(), json!(b));
+            }
+        }
+        if !c.is_empty() {
+            out.insert(site.to_ascii_lowercase(), Value::Object(c));
+        }
+    }
+    Ok(Value::Object(out))
+}
+
 /// Checks one setting. Returns `{ok: true, value}` with the cleaned value, or `{ok: false, message}`.
 pub fn validate(key: &str, v: &Value) -> Value {
     let r: Result<Value, String> = match key {
         "summaryMode" | "blockTrackers" | "httpsOnly" | "blockThirdPartyCookies" | "sendGpc" | "clearOnExit" | "memorySaver"
         | "safeBrowsing" | "downloadWarnings" | "showHomeButton" | "showShortcuts" | "toolbarSummary" | "toolbarShield"
         | "downloadsAsk" | "searchSuggestions" | "rememberSearches" | "bookmarksBar" | "showAiButton" | "saveHistory"
-        | "aiIncludePage" | "inlineAutocomplete" | "showMailLink" => boolean(v),
+        | "aiIncludePage" | "inlineAutocomplete" | "showMailLink" | "bangs" | "tabsCollapsed" | "compactMode" | "mruTabSwitching"
+        | "showSplitButton" | "stripTracking" | "hideAdElements" => boolean(v),
+        "customBangs" => crate::bangs::validate_custom(v),
+        "tabLayout" => one_of(v, &["horizontal", "vertical"]),
+        "tabSide" => one_of(v, &["left", "right"]),
+        "tabsWidth" => match v.as_f64() {
+            // the sidebar snaps back to its default width when you drag close to it
+            Some(w) if (160.0..=400.0).contains(&w) => Ok(json!(if (w - 220.0).abs() <= 6.0 { 220 } else { w.round() as i64 })),
+            _ => Err("expected a width from 160 to 400".into()),
+        },
+        "fingerprinting" => one_of(v, &["off", "standard", "strict"]),
+        "siteShields" => site_shields(v),
         "searchEngine" => one_of(v, &["lantern", "duckduckgo", "brave", "startpage", "ecosia", "google", "bing"]),
         "camera" | "microphone" | "notifications" | "location" => one_of(v, &["ask", "block"]),
         "theme" => one_of(v, &["system", "light", "dark"]),
@@ -119,7 +155,9 @@ pub fn keys() -> Value {
         "downloadWarnings", "showHomeButton", "showShortcuts", "toolbarSummary", "toolbarShield", "downloadsAsk", "searchSuggestions",
         "rememberSearches", "bookmarksBar", "showAiButton", "saveHistory", "aiIncludePage", "inlineAutocomplete", "showMailLink",
         "searchEngine", "camera", "microphone", "notifications", "location", "theme", "themeColor", "customAccent", "ntpBackground",
-        "shortcuts", "defaultZoom", "startup", "startupUrl", "mailService", "mailUrl"
+        "shortcuts", "defaultZoom", "startup", "startupUrl", "mailService", "mailUrl",
+        "bangs", "customBangs", "tabLayout", "tabSide", "tabsCollapsed", "tabsWidth", "compactMode", "mruTabSwitching", "showSplitButton",
+        "fingerprinting", "siteShields", "stripTracking", "hideAdElements"
     ])
 }
 
@@ -141,5 +179,13 @@ mod tests {
         assert_eq!(validate("nope", &json!(1))["ok"], false);
         assert_eq!(validate("shortcuts", &json!([{ "title": "A", "url": "https://a.com" }]))["ok"], true);
         assert_eq!(validate("ntpBackground", &json!("color:#AABBCC"))["value"], "color:#aabbcc");
+        assert_eq!(validate("tabsWidth", &json!(224))["value"], 220);
+        assert_eq!(validate("tabsWidth", &json!(300.4))["value"], 300);
+        assert_eq!(validate("tabsWidth", &json!(90))["ok"], false);
+        assert_eq!(validate("tabLayout", &json!("vertical"))["ok"], true);
+        assert_eq!(validate("fingerprinting", &json!("max"))["ok"], false);
+        assert_eq!(validate("siteShields", &json!({ "Example.com": { "off": true, "x": 1 } }))["value"], json!({ "example.com": { "off": true } }));
+        assert_eq!(validate("siteShields", &json!({ "bad site": { "off": true } }))["ok"], false);
+        assert_eq!(validate("customBangs", &json!([{ "trigger": "jira", "url": "https://jira.example.com/browse/{q}" }]))["ok"], true);
     }
 }

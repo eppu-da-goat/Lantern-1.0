@@ -39,6 +39,15 @@ Your profiles, history, bookmarks and keys are kept when you update.
 - Lantern Search: private results re-ranked on your device, with a summary in which every point links to its source.
 - A **Mail** link at the top right of Lantern Search and the New Tab page. It opens Gmail, Outlook, Proton Mail, Yahoo, iCloud, Zoho, Fastmail or any web mail address you choose.
 
+**Tabs your way**
+- Vertical tabs in a sidebar (⇧⌘E), on the left or right, resizable or collapsed to icons.
+- Split view: two tabs side by side (⌥⌘S, Shift+click a tab, or right-click a link).
+- Tab groups with names and colours, compact mode, and Ctrl+Tab in most-recently-used order.
+- `@tabs`, `@history` and `@bookmarks` search in the address bar.
+
+**!bangs**
+- `!w moon`, `moon !yt`, `!gh lantern`: 185 built-in shortcuts, plus your own. They're resolved on your device by the Rust core.
+
 **Everyday browsing**
 - History page with search (<kbd>⌘Y</kbd> / <kbd>Ctrl+H</kbd>), and address-bar suggestions that complete addresses as you type.
 - Bookmarks: the star in the address bar, a bookmarks bar (<kbd>⇧⌘B</kbd>) and a bookmark manager.
@@ -48,7 +57,10 @@ Your profiles, history, bookmarks and keys are kept when you update.
 - Print, save page, a zoom indicator, a downloads page, profiles and Chrome Web Store extensions.
 
 **Privacy and safety**
-- Trackers and ads blocked, HTTPS upgrades, Global Privacy Control, third-party cookies blocked.
+- Ad blocker: ads and trackers blocked, leftover ad boxes hidden, and optionally cookie banners and annoyances too.
+- Shields per site, fingerprint protection (standard or strict), clean links with tracking parameters removed, and secure DNS (DNS over HTTPS).
+- HTTPS upgrades, Global Privacy Control, third-party cookies blocked, and incognito windows.
+- **Lantern services**: a live log of every request Lantern makes on its own, and switches to turn them off.
 - Warnings for scam and malware sites, using threat lists checked on your device.
 - Memory saver puts idle tabs to sleep.
 - Custom theme colour, adjusted automatically so text stays readable in light and dark mode.
@@ -68,6 +80,8 @@ rust/lantern-core/   Rust core, compiled to WebAssembly
   settings.rs        every setting a page can change is validated here before it's saved
   theme.rs           custom colours turned into contrast-checked light and dark palettes
   rank.rs            history and bookmark ranking plus inline completion for the address bar
+  bangs.rs           !bangs: 185 built-in shortcuts plus your own, as prefix or suffix
+  cleanurl.rs        strips tracking parameters from links
   mail.rs, qr.rs     the Mail link and QR codes for sharing
 app/                 Electron app
   src/main.js        windows, tabs, side panel, menus and IPC

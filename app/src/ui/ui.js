@@ -117,9 +117,11 @@
     if (!editing) address.value = d.text;
     address.placeholder = `Search ${state.settings.engineName || 'Lantern'} or type a URL`;
     const blocked = t.blocked || 0;
-    shield.hidden = state.settings.toolbarShield === false || !(blocked > 0 && /^https?:/.test(t.url));
-    $('blocked').textContent = blocked > 999 ? '999+' : String(blocked);
-    shield.title = `${blocked} tracker${blocked === 1 ? '' : 's'} blocked on this page · ${state.blockedTotal} this session`;
+    shield.hidden = state.settings.toolbarShield === false || !/^https?:/.test(t.url);
+    shield.classList.toggle('off', t.shields === false);
+    shield.classList.toggle('zero', !blocked);
+    $('blocked').textContent = t.shields === false ? 'Off' : blocked > 999 ? '999+' : String(blocked);
+    shield.title = t.shields === false ? 'Shields are down for this site · click to change' : `Shields up · ${blocked} tracker${blocked === 1 ? '' : 's'} blocked on this page · ${state.blockedTotal} this session`;
     summaryBtn.setAttribute('aria-pressed', String(!!state.settings.summaryMode));
     $('back').disabled = !t.canBack;
     $('forward').disabled = !t.canForward;
@@ -142,78 +144,273 @@
     return t.title || t.url || 'New Tab';
   }
 
-  function renderTabs() {
-    const existing = new Map([...tabsEl.children].map((el) => [Number(el.dataset.id), el]));
-    const narrow = state.tabs.length > 0 && tabsEl.clientWidth / state.tabs.length < 96;
-    state.tabs.forEach((t, i) => {
-      let el = existing.get(t.id);
-      if (!el) {
-        el = document.createElement('div');
-        el.className = 'tab' + (firstRender ? '' : ' enter');
-        el.dataset.id = t.id;
-        el.setAttribute('role', 'tab');
-        el.draggable = true;
-        el.innerHTML = '<span class="flare"></span><span class="icon"></span><span class="title"></span><span class="audio-slot"></span><button class="x" aria-label="Close tab">' + ICONS.close + '</button>';
-        el.addEventListener('animationend', () => el.classList.remove('enter'), { once: true });
-        el.addEventListener('mousedown', (e) => {
-          if (e.button === 1) { e.preventDefault(); api.send({ type: 'close-tab', id: t.id }); return; }
-          if (!e.target.closest('.x')) api.send({ type: 'activate', id: t.id });
-        });
-        el.querySelector('.x').addEventListener('click', (e) => { e.stopPropagation(); api.send({ type: 'close-tab', id: t.id }); });
-        el.querySelector('.audio-slot').addEventListener('mousedown', (e) => { if (e.button === 0 && el.querySelector('.audio-slot').firstChild) { e.stopPropagation(); api.send({ type: 'mute', id: Number(el.dataset.id) }); } });
-        el.addEventListener('contextmenu', (e) => { e.preventDefault(); api.send({ type: 'tab-menu', id: Number(el.dataset.id), x: e.clientX, y: e.clientY }); });
-        el.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/lantern-tab', String(t.id)); });
-        el.addEventListener('dragover', (e) => e.preventDefault());
-        el.addEventListener('drop', (e) => {
-          e.preventDefault();
-          const id = Number(e.dataTransfer.getData('text/lantern-tab'));
-          const to = state.tabs.findIndex((x) => x.id === Number(el.dataset.id));
-          if (id && to >= 0) api.send({ type: 'move', id, to });
-        });
-      }
-      existing.delete(t.id);
-      if (tabsEl.children[i] !== el) tabsEl.insertBefore(el, tabsEl.children[i] || null);
-      el.classList.toggle('active', t.id === state.activeId);
-      el.classList.toggle('narrow', narrow);
-      el.classList.toggle('sleeping', !!t.sleeping);
-      el.classList.toggle('pinned', !!t.pinned);
-      el.setAttribute('aria-selected', String(t.id === state.activeId));
-      const title = titleFor(t);
-      el.querySelector('.title').textContent = title;
-      el.title = t.sleeping ? `${title} (sleeping to save memory)` : title;
-      const slot = el.querySelector('.audio-slot');
-      slot.innerHTML = t.muted ? ICONS.muted : t.audible ? ICONS.audio : '';
-      slot.title = t.muted ? 'Unmute this tab' : t.audible ? 'Mute this tab' : '';
-      const icon = el.querySelector('.icon');
-      const kind = displayFor(t.url).kind;
-      const key = t.loading ? 'spin' : t.favicon ? 'img:' + t.favicon : 'k:' + kind;
-      if (icon.dataset.key !== key) {
-        icon.dataset.key = key;
-        if (t.loading) icon.innerHTML = '<span class="spin"></span>';
-        else if (t.favicon) {
-          icon.innerHTML = '';
-          const img = document.createElement('img');
-          img.src = t.favicon;
-          img.alt = '';
-          img.onerror = () => { icon.innerHTML = ICONS.globe; };
-          icon.appendChild(img);
-        } else {
-          icon.innerHTML = ['spark', 'lantern', 'gear', 'search', 'danger', 'library'].includes(kind) ? ICONS[kind] : ICONS.globe;
-          icon.classList.toggle('danger', kind === 'danger');
-        }
+  const GROUP_COLORS = { grey: '#7c8591', blue: '#3b82f6', red: '#e5484d', yellow: '#d6a305', green: '#30a46c', pink: '#e93d82', purple: '#8e4ec6', cyan: '#12a5c5', orange: '#f76b15' };
+  const vtabsEl = $('vtabs');
+  const vpinnedEl = $('vpinned');
+  const tabEls = new Map();
+  const groupEls = new Map();
+  let renamingGroup = 0;
+
+  function makeTab(t) {
+    const el = document.createElement('div');
+    el.className = 'tab' + (firstRender ? '' : ' enter');
+    el.dataset.id = t.id;
+    el.setAttribute('role', 'tab');
+    el.draggable = true;
+    el.innerHTML = '<span class="flare"></span><span class="icon"></span><span class="title"></span><svg class="split-mark" viewBox="0 0 20 20"><rect x="3" y="4.5" width="14" height="11" rx="2"/><path d="M10 4.5v11"/></svg><span class="audio-slot"></span><button class="x" aria-label="Close tab">' + ICONS.close + '</button>';
+    el.addEventListener('animationend', () => el.classList.remove('enter'), { once: true });
+    el.addEventListener('mousedown', (e) => {
+      if (e.button === 1) { e.preventDefault(); api.send({ type: 'close-tab', id: Number(el.dataset.id) }); return; }
+      if (e.button === 0 && !e.target.closest('.x')) {
+        // Shift+click puts a tab next to the current one in split view.
+        if (e.shiftKey && Number(el.dataset.id) !== state.activeId) api.send({ type: 'split-with', id: Number(el.dataset.id), with: state.activeId });
+        else api.send({ type: 'activate', id: Number(el.dataset.id) });
       }
     });
-    for (const el of existing.values()) el.remove();
+    el.querySelector('.x').addEventListener('click', (e) => { e.stopPropagation(); api.send({ type: 'close-tab', id: Number(el.dataset.id) }); });
+    el.querySelector('.audio-slot').addEventListener('mousedown', (e) => { if (e.button === 0 && el.querySelector('.audio-slot').firstChild) { e.stopPropagation(); api.send({ type: 'mute', id: Number(el.dataset.id) }); } });
+    el.addEventListener('contextmenu', (e) => { e.preventDefault(); api.send({ type: 'tab-menu', id: Number(el.dataset.id), x: e.clientX, y: e.clientY }); });
+    el.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/lantern-tab', el.dataset.id); });
+    el.addEventListener('dragover', (e) => e.preventDefault());
+    el.addEventListener('drop', (e) => {
+      e.preventDefault();
+      const id = Number(e.dataTransfer.getData('text/lantern-tab'));
+      const target = state.tabs.find((x) => x.id === Number(el.dataset.id));
+      const to = state.tabs.indexOf(target);
+      if (!id || to < 0) return;
+      const moving = state.tabs.find((x) => x.id === id);
+      api.send({ type: 'move', id, to });
+      // Dropping onto a grouped tab joins its group; onto an ungrouped one leaves the group.
+      if (moving && (moving.group || null) !== (target.group || null)) api.send({ type: 'group-move', id, group: target.group || 0 });
+    });
+    return el;
+  }
+
+  function updateTab(el, t, narrow) {
+    el.classList.toggle('active', t.id === state.activeId);
+    el.classList.toggle('narrow', narrow);
+    el.classList.toggle('sleeping', !!t.sleeping);
+    el.classList.toggle('pinned', !!t.pinned);
+    el.classList.toggle('split', !!t.split);
+    const g = t.group && (state.groups || []).find((x) => x.id === t.group);
+    el.classList.toggle('grouped', !!g);
+    if (g) el.style.setProperty('--gcolor', GROUP_COLORS[g.color] || GROUP_COLORS.grey); else el.style.removeProperty('--gcolor');
+    el.setAttribute('aria-selected', String(t.id === state.activeId));
+    const title = titleFor(t);
+    el.querySelector('.title').textContent = title;
+    el.title = (t.sleeping ? `${title} (sleeping to save memory)` : title) + (t.split ? ' · in split view' : '');
+    const slot = el.querySelector('.audio-slot');
+    slot.innerHTML = t.muted ? ICONS.muted : t.audible ? ICONS.audio : '';
+    slot.title = t.muted ? 'Unmute this tab' : t.audible ? 'Mute this tab' : '';
+    const icon = el.querySelector('.icon');
+    const kind = displayFor(t.url).kind;
+    const key = t.loading ? 'spin' : t.favicon ? 'img:' + t.favicon : 'k:' + kind;
+    if (icon.dataset.key !== key) {
+      icon.dataset.key = key;
+      if (t.loading) icon.innerHTML = '<span class="spin"></span>';
+      else if (t.favicon) {
+        icon.innerHTML = '';
+        const img = document.createElement('img');
+        img.src = t.favicon;
+        img.alt = '';
+        img.onerror = () => { icon.innerHTML = ICONS.globe; };
+        icon.appendChild(img);
+      } else {
+        icon.innerHTML = ['spark', 'lantern', 'gear', 'search', 'danger', 'library'].includes(kind) ? ICONS[kind] : ICONS.globe;
+        icon.classList.toggle('danger', kind === 'danger');
+      }
+    }
+  }
+
+  function groupEl(g, vertical) {
+    const key = `${vertical ? 'v' : 'h'}${g.id}`;
+    let el = groupEls.get(key);
+    if (!el) {
+      el = document.createElement('div');
+      el.className = vertical ? 'ghead' : 'gchip';
+      el.dataset.group = g.id;
+      el.innerHTML = vertical ? '<span class="gdot"></span><span class="gname"></span><svg class="gcaret" viewBox="0 0 20 20"><path d="M6 8l4 4 4-4"/></svg>' : '<span class="gname"></span>';
+      el.addEventListener('click', () => { if (!el.querySelector('input')) api.send({ type: 'group-toggle', id: Number(el.dataset.group) }); });
+      el.addEventListener('dblclick', (e) => { e.preventDefault(); startRename(Number(el.dataset.group)); });
+      el.addEventListener('contextmenu', (e) => { e.preventDefault(); api.send({ type: 'group-menu', id: Number(el.dataset.group), x: e.clientX, y: e.clientY }); });
+      el.addEventListener('dragover', (e) => { e.preventDefault(); el.classList.add('drop-group'); });
+      el.addEventListener('dragleave', () => el.classList.remove('drop-group'));
+      el.addEventListener('drop', (e) => {
+        e.preventDefault();
+        el.classList.remove('drop-group');
+        const id = Number(e.dataTransfer.getData('text/lantern-tab'));
+        if (id) api.send({ type: 'group-move', id, group: Number(el.dataset.group) });
+      });
+      groupEls.set(key, el);
+    }
+    el.style.setProperty('--gcolor', GROUP_COLORS[g.color] || GROUP_COLORS.grey);
+    el.classList.toggle('collapsed', !!g.collapsed);
+    const count = state.tabs.filter((t) => t.group === g.id).length;
+    if (!el.querySelector('input')) {
+      el.querySelector('.gname').textContent = g.name || (vertical ? `${g.color[0].toUpperCase()}${g.color.slice(1)} group` : (g.collapsed ? String(count) : ''));
+      el.classList.toggle('empty-name', !vertical && !g.name && !g.collapsed);
+    }
+    el.title = `${g.name || 'Unnamed group'} · ${count} tab${count === 1 ? '' : 's'} · click to ${g.collapsed ? 'expand' : 'collapse'}, double-click to rename`;
+    return el;
+  }
+
+  function startRename(gid) {
+    const g = (state.groups || []).find((x) => x.id === gid);
+    const el = [...groupEls.values()].find((x) => Number(x.dataset.group) === gid && x.isConnected);
+    if (!g || !el) return;
+    renamingGroup = gid;
+    const input = document.createElement('input');
+    input.value = g.name || '';
+    input.placeholder = 'Name this group';
+    input.maxLength = 40;
+    const name = el.querySelector('.gname');
+    name.textContent = '';
+    name.append(input);
+    el.classList.remove('empty-name');
+    input.focus();
+    input.select();
+    const done = (save) => {
+      if (!renamingGroup) return;
+      renamingGroup = 0;
+      if (save) api.send({ type: 'group-rename', id: gid, name: input.value.trim() });
+      input.remove();
+      renderTabs();
+    };
+    input.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') done(true); if (e.key === 'Escape') done(false); });
+    input.addEventListener('blur', () => done(true));
+    input.addEventListener('mousedown', (e) => e.stopPropagation());
+  }
+  if (api.onGroupRename) api.onGroupRename((gid) => setTimeout(() => startRename(Number(gid)), 60));
+
+  function renderTabs() {
+    const vertical = !!(state.layout && state.layout.vertical);
+    const groups = new Map((state.groups || []).map((g) => [g.id, g]));
+    const seq = [];
+    const pinned = [];
+    const seenGroups = new Set();
+    for (const t of state.tabs) {
+      let el = tabEls.get(t.id);
+      if (!el) { el = makeTab(t); tabEls.set(t.id, el); }
+      if (t.pinned && vertical) { pinned.push(el); continue; }
+      const g = t.group && groups.get(t.group);
+      if (g && !seenGroups.has(g.id)) { seenGroups.add(g.id); seq.push(groupEl(g, vertical)); }
+      if (g && g.collapsed && t.id !== state.activeId) { el.remove(); continue; }
+      seq.push(el);
+    }
+    const alive = new Set(state.tabs.map((t) => t.id));
+    for (const [id, el] of tabEls) if (!alive.has(id)) { el.remove(); tabEls.delete(id); }
+    for (const [key, el] of groupEls) if (!groups.has(Number(el.dataset.group))) { el.remove(); groupEls.delete(key); }
+    const host = vertical ? vtabsEl : tabsEl;
+    const other = vertical ? tabsEl : vtabsEl;
+    for (const el of [...other.children]) el.remove();
+    if (!vertical) for (const el of [...vpinnedEl.children]) el.remove();
+    // put the elements in order, reusing them so animations and images don't restart
+    const place = (box, list) => {
+      list.forEach((el, i) => { if (box.children[i] !== el) box.insertBefore(el, box.children[i] || null); });
+      while (box.children.length > list.length) box.lastChild.remove();
+    };
+    if (vertical) place(vpinnedEl, pinned);
+    place(host, seq);
+    const visibleTabs = seq.filter((el) => el.classList.contains('tab')).length + pinned.length;
+    const narrow = !vertical && visibleTabs > 0 && tabsEl.clientWidth / visibleTabs < 96;
+    for (const t of state.tabs) updateTab(tabEls.get(t.id), t, narrow);
+    if (vertical) vtabsEl.querySelector('.tab.active')?.scrollIntoView({ block: 'nearest' });
     firstRender = false;
   }
+
+  // ---------- frame layout: compact, vertical sidebar, split view ----------
+  function renderFrame() {
+    const L = state.layout || {};
+    document.body.classList.toggle('compact', !!L.compact);
+    document.body.classList.toggle('vertical', !!L.vertical);
+    document.body.classList.toggle('side-right', !!L.sideRight);
+    document.body.classList.toggle('collapsed', !!L.collapsed);
+    const root = document.documentElement.style;
+    root.setProperty('--top', `${(L.strip || 0) + (L.toolbar || 44) + (L.bar || 0)}px`);
+    root.setProperty('--side', `${L.side || 0}px`);
+    $('side').hidden = !L.vertical;
+    $('side-toggle').title = L.collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+    // split view: divider between the two pages, and a ring around the one you're using
+    const panes = L.panes || [];
+    const splitOn = !!L.split && panes.length === 2;
+    const bar = $('splitbar');
+    const ring = $('panering');
+    $('splitbtn').hidden = state.settings.showSplitButton === false;
+    $('splitbtn').setAttribute('aria-pressed', String(splitOn));
+    $('splitbtn').title = splitOn ? 'Close split view (⌥⌘S)' : 'Split view (⌥⌘S)';
+    bar.hidden = !splitOn;
+    ring.hidden = !splitOn || state.dragShots;
+    if (splitOn) {
+      const [p0, p1] = panes;
+      Object.assign(bar.style, { left: `${p0.x + p0.width}px`, top: `${p0.y}px`, height: `${p0.height}px`, width: `${p1.x - (p0.x + p0.width)}px` });
+      const act = panes.find((p) => p.id === state.activeId) || p0;
+      Object.assign(ring.style, { left: `${act.x - 2}px`, top: `${act.y - 2}px`, width: `${act.width + 4}px`, height: `${act.height + 4}px` });
+    }
+    // snapshots of the pages while a divider is being dragged
+    const shots = $('shots');
+    shots.textContent = '';
+    if (state.dragShots) {
+      for (const sh of state.dragShots) {
+        const p = panes.find((x) => x.id === sh.id);
+        if (!p) continue;
+        const img = document.createElement('img');
+        img.src = sh.src;
+        Object.assign(img.style, { left: `${p.x}px`, top: `${p.y}px`, width: `${p.width}px`, height: `${p.height}px` });
+        shots.append(img);
+      }
+    }
+  }
+
+  // Dragging the sidebar edge or the split divider. The pages are swapped for snapshots while
+  // dragging so the mouse stays with the frame.
+  function startDrag(kind, e) {
+    e.preventDefault();
+    const L = state.layout || {};
+    const panes = L.panes || [];
+    document.body.classList.add(kind === 'split' ? 'dragging-split' : 'dragging-side');
+    api.send({ type: 'drag-start', kind });
+    let raf = 0;
+    const move = (ev) => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        if (kind === 'sidebar') {
+          const w = L.sideRight ? window.innerWidth - ev.clientX : ev.clientX;
+          api.send({ type: 'sidebar-width', width: Math.max(160, Math.min(400, w)) });
+        } else if (panes.length === 2) {
+          const left = panes[0].x; const right = panes[1].x + panes[1].width;
+          api.send({ type: 'split-ratio', ratio: (ev.clientX - left) / Math.max(1, right - left) });
+        }
+      });
+    };
+    const up = () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+      document.body.classList.remove('dragging-split', 'dragging-side');
+      api.send({ type: 'drag-end', kind });
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  }
+  $('side-grip').addEventListener('mousedown', (e) => startDrag('sidebar', e));
+  $('splitbar').addEventListener('mousedown', (e) => { if (!e.target.closest('button')) startDrag('split', e); });
+  $('split-swap').addEventListener('click', () => api.send({ type: 'split-swap' }));
+  $('split-close').addEventListener('click', () => api.send({ type: 'split-close' }));
+  $('splitbtn').addEventListener('click', () => api.send({ type: (state.layout && state.layout.split) ? 'split-close' : 'split-new' }));
+  $('side-toggle').addEventListener('click', () => api.send({ type: 'sidebar-toggle' }));
+  $('side-layout').addEventListener('click', () => api.send({ type: 'layout-toggle' }));
+  $('side-new').addEventListener('click', () => api.send({ type: 'new-tab' }));
+  $('v-newtab').addEventListener('click', () => api.send({ type: 'new-tab' }));
+  $('vtabs').addEventListener('dblclick', (e) => { if (e.target.id === 'vtabs') api.send({ type: 'new-tab' }); });
+  $('shield').addEventListener('click', (e) => { const r = e.currentTarget.getBoundingClientRect(); api.send({ type: 'shield-menu', x: r.left, y: r.bottom + 4 }); });
 
   // ---------- events ----------
   api.onState((s) => {
     // Switching tabs abandons whatever was being typed, like Chrome.
     if (state.activeId !== s.activeId && editing) { hideSugg(); editing = false; omni.classList.remove('focus'); if (document.activeElement === address) address.blur(); }
-    state = s; renderTabs(); renderToolbar();
+    state = s; renderTabs(); renderFrame(); renderToolbar();
   });
   api.onFocusOmnibox(() => { closeFind(); address.focus(); address.select(); });
+  if (api.onOmniboxText) api.onOmniboxText((text) => { closeFind(); address.focus(); address.value = text; lastInput = ''; querySugg(text); });
   api.onFullscreen((on) => document.body.classList.toggle('fullscreen', on));
 
   // ---------- suggestions (as you type) ----------
@@ -395,7 +592,7 @@
   $('strip').addEventListener('dblclick', (e) => {
     if (e.target.id === 'strip' || e.target.classList.contains('drag-fill')) api.send({ type: 'new-tab' });
   });
-  window.addEventListener('resize', () => { renderTabs(); renderBookmarksBar(true); });
+  window.addEventListener('resize', () => { renderTabs(); renderFrame(); renderBookmarksBar(true); });
 
   // ---------- bookmarks bar ----------
   let barKey = '';

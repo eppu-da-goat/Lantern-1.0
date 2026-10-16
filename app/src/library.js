@@ -151,6 +151,67 @@ class Library {
     try { writeAtomic(this.bookmarksFile, JSON.stringify(this.bookmarks, null, 1)); } catch {}
   }
 
+  // ---------- import / export ----------
+  // History from another browser: kept with its own dates and visit counts, merged with yours.
+  importHistory(entries) {
+    if (this.memoryOnly) return 0;
+    let n = 0;
+    for (const e of entries) {
+      const url = cleanUrl(e.url);
+      if (!url) continue;
+      const last = Number(e.last) || Date.now();
+      const h = this._byUrl.get(url);
+      if (h) {
+        h.visits = Math.max(h.visits || 0, Number(e.visits) || 1);
+        if (last > h.last) h.last = last;
+        if (!h.title || h.title === url) h.title = cleanTitle(e.title, url);
+      } else {
+        const nh = { url, title: cleanTitle(e.title, url), visits: Math.max(1, Number(e.visits) || 1), first: last, last };
+        this.history.push(nh);
+        this._byUrl.set(url, nh);
+        n++;
+      }
+    }
+    if (this.history.length > MAX_HISTORY) {
+      this.history.sort((a, b) => b.last - a.last);
+      for (const old of this.history.splice(MAX_HISTORY)) this._byUrl.delete(old.url);
+    }
+    this.saveNow();
+    return n;
+  }
+  // Bookmarks from another browser or a bookmarks file. Duplicates are skipped.
+  importBookmarks(list) {
+    let n = 0;
+    const have = new Set(this.bookmarks.map((b) => b.url));
+    for (const item of list) {
+      const url = cleanUrl(item.url);
+      if (!url || have.has(url) || this.bookmarks.length >= MAX_BOOKMARKS) continue;
+      have.add(url);
+      this.bookmarks.push({
+        id: crypto.randomBytes(6).toString('hex'), url, title: cleanTitle(item.title, url), favicon: '',
+        added: Number(item.added) || Date.now(), ...(item.folder ? { folder: String(item.folder).slice(0, 120) } : {}),
+      });
+      n++;
+    }
+    this.saveBookmarks();
+    return n;
+  }
+  // The standard bookmarks file every browser (and Raindrop.io) can import.
+  exportHtml() {
+    const esc = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const byFolder = new Map();
+    for (const b of this.bookmarks) { const f = b.folder || ''; if (!byFolder.has(f)) byFolder.set(f, []); byFolder.get(f).push(b); }
+    const line = (b) => `    <DT><A HREF="${esc(b.url)}" ADD_DATE="${Math.round((b.added || Date.now()) / 1000)}">${esc(b.title)}</A>`;
+    const out = ['<!DOCTYPE NETSCAPE-Bookmark-file-1>', '<!-- Exported from Lantern -->', '<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">', '<TITLE>Bookmarks</TITLE>', '<H1>Bookmarks</H1>', '<DL><p>'];
+    for (const b of byFolder.get('') || []) out.push(line(b).slice(2));
+    for (const [f, list] of byFolder) {
+      if (!f) continue;
+      out.push(`  <DT><H3>${esc(f)}</H3>`, '  <DL><p>', ...list.map(line), '  </DL><p>');
+    }
+    out.push('</DL><p>');
+    return out.join('\n');
+  }
+
   // ---------- address bar ----------
   // History and bookmarks that match what's typed, best first, with an inline completion.
   suggest(text, limit = 4) {

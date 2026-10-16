@@ -6,6 +6,8 @@
 //! never touches the network or the disk, so it is easy to test and can't leak anything.
 
 pub mod ai;
+pub mod bangs;
+pub mod cleanurl;
 pub mod mail;
 pub mod qr;
 pub mod rank;
@@ -44,6 +46,12 @@ pub fn dispatch(input: &[u8]) -> Value {
         "settings.keys" => Ok(settings::keys()),
         "mail.services" => Ok(mail::services()),
         "mail.url" => mail::url(s(a, "service"), s(a, "custom")),
+        // !bangs
+        "bangs.resolve" => Ok(bangs::resolve(s(a, "input"), a.get("custom").unwrap_or(&json!([])))),
+        "bangs.suggest" => Ok(bangs::suggest(s(a, "prefix"), a.get("custom").unwrap_or(&json!([])), a.get("limit").and_then(Value::as_u64).unwrap_or(6) as usize)),
+        "bangs.list" => Ok(bangs::list()),
+        "bangs.validate" => bangs::validate_custom(a.get("bangs").unwrap_or(&Value::Null)),
+        "url.clean" => Ok(cleanurl::clean(s(a, "url"))),
         // Omnibox and library
         "rank.entries" => Ok(rank::rank(a)),
         "qr.svg" => qr::svg(s(a, "text"), s(a, "dark"), s(a, "light")),

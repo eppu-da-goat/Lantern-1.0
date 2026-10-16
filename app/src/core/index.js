@@ -70,6 +70,13 @@ module.exports = {
     services: () => call('mail.services'),
     url: (service, custom) => call('mail.url', { service, custom }),
   },
+  bangs: {
+    resolve: (input, custom = []) => call('bangs.resolve', { input, custom }),
+    suggest: (prefix, custom = [], limit = 6) => call('bangs.suggest', { prefix, custom, limit }),
+    list: () => call('bangs.list'),
+    validate: (bangs) => call('bangs.validate', { bangs }),
+  },
+  cleanUrl: (url) => call('url.clean', { url }),
   rank: (query, items, { now = Date.now(), limit = 8 } = {}) => call('rank.entries', { query, items, now, limit }),
   qr: (text, dark, light) => call('qr.svg', { text, dark, light }),
 };
