@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: https:; style-src 'self'; script-src 'self'; font-src 'self'">
+<title>Side panel</title>
+<link rel="stylesheet" href="assets/lantern.css">
+<link rel="stylesheet" href="assets/panel.css">
+</head>
+<body>
+  <header class="phead">
+    <nav class="ptabs" role="tablist" aria-label="Side panel">
+      <button type="button" role="tab" data-mode="ai" id="tab-ai">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5l1.6 4.4 4.4 1.6-4.4 1.6L10 14.5l-1.6-4.4L4 8.5l4.4-1.6z"/></svg>AI
+      </button>
+      <button type="button" role="tab" data-mode="reader" id="tab-reader">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 4.5h5a2 2 0 0 1 2 2V16a1.6 1.6 0 0 0-1.6-1.5H3zM17 4.5h-5a2 2 0 0 0-2 2V16a1.6 1.6 0 0 1 1.6-1.5H17z"/></svg>Reading
+      </button>
+      <button type="button" role="tab" data-mode="share" id="tab-share">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 12.5V3.5M6.5 7 10 3.5 13.5 7M5 10.5v5h10v-5"/></svg>Share
+      </button>
+    </nav>
+    <button type="button" id="close" class="icon-btn" title="Close side panel" aria-label="Close side panel">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5 5 15"/></svg>
+    </button>
+  </header>
+
+  <!-- ================= AI ================= -->
+  <section id="v-ai" class="view" hidden>
+    <div class="ai-top">
+      <div id="providers" class="providers" role="radiogroup" aria-label="AI service"></div>
+      <div class="ai-tools">
+        <select id="model" aria-label="Model" title="Model"></select>
+        <button type="button" id="new-chat" class="icon-btn sm" title="New chat" aria-label="New chat">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4.5v11M4.5 10h11"/></svg>
+        </button>
+        <button type="button" id="open-keys" class="icon-btn sm" title="API keys" aria-label="API keys">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="7" cy="12.5" r="3.2"/><path d="m9.3 10.2 6.2-6.2M13.5 6l2 2M11.8 7.7l1.6 1.6"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <div id="chat" class="chat" aria-live="polite">
+      <div id="welcome" class="welcome">
+        <div class="orb" aria-hidden="true"></div>
+        <h2 id="welcome-title">Ask anything</h2>
+        <p id="welcome-text" class="muted">Answers come from the AI service you choose, using your own API key.</p>
+        <div id="quick" class="quick">
+          <button type="button" data-q="Summarize this page in 5 key points." data-page="1">Summarize this page</button>
+          <button type="button" data-q="What are the most important takeaways from this page, and what should I be careful about?" data-page="1">Key takeaways</button>
+          <button type="button" data-q="Explain this page simply, as if I'm new to the topic." data-page="1">Explain it simply</button>
+          <button type="button" data-q="Translate the main content of this page into English. Keep the structure." data-page="1">Translate to English</button>
+        </div>
+      </div>
+      <ol id="messages" class="messages"></ol>
+    </div>
+
+    <form id="composer" class="composer" autocomplete="off">
+      <div class="ctx-row">
+        <button type="button" id="use-page" class="page-chip" aria-pressed="true" title="Send this page's text with your question">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5.5 3h6l3.5 3.5V17h-9.5z"/><path d="M11.5 3v3.5H15"/></svg>
+          <span id="page-name">This page</span>
+        </button>
+        <span id="sel-chip" class="sel-chip" hidden></span>
+      </div>
+      <div class="box">
+        <textarea id="input" rows="1" placeholder="Ask anything…" aria-label="Message"></textarea>
+        <button type="submit" id="send" class="send" title="Send (Enter)" aria-label="Send">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 15.5v-11M5.5 9 10 4.5 14.5 9"/></svg>
+        </button>
+        <button type="button" id="stop" class="send stop" title="Stop" aria-label="Stop" hidden>
+          <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="6" y="6" width="8" height="8" rx="1.5"/></svg>
+        </button>
+      </div>
+      <p class="fine">AI can be wrong. Check important facts.</p>
+    </form>
+  </section>
+
+  <!-- ================= API keys ================= -->
+  <section id="v-keys" class="view keys" hidden>
+    <div class="keys-head">
+      <button type="button" id="keys-back" class="icon-btn sm" title="Back to chat" aria-label="Back to chat">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12.5 4.5 7 10l5.5 5.5"/></svg>
+      </button>
+      <h2>API keys</h2>
+    </div>
+
+    <form id="key-form" class="card key-form" autocomplete="off">
+      <label class="lbl" for="key-input">Paste an API key</label>
+      <div class="key-field">
+        <input id="key-input" type="password" spellcheck="false" placeholder="sk-ant-…, sk-…, AIza… or gsk_…" autocomplete="off">
+        <button type="button" id="key-reveal" class="icon-btn sm" title="Show key" aria-label="Show key">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2.5 10s2.8-5 7.5-5 7.5 5 7.5 5-2.8 5-7.5 5-7.5-5-7.5-5z"/><circle cx="10" cy="10" r="2.2"/></svg>
+        </button>
+      </div>
+      <label class="lbl" for="key-provider">Which API is this key for?</label>
+      <select id="key-provider">
+        <option value="">Choose…</option>
+      </select>
+      <p id="key-detect" class="hint"></p>
+      <p id="key-msg" class="msg" hidden></p>
+      <div class="row-end">
+        <button type="button" id="key-switch" class="btn" hidden></button>
+        <button type="submit" id="key-save" class="btn primary">Check and save</button>
+      </div>
+    </form>
+
+    <ul id="key-list" class="key-list"></ul>
+    <p id="key-safety" class="muted small"></p>
+  </section>
+
+  <!-- ================= Reading mode ================= -->
+  <section id="v-reader" class="view reader" hidden>
+    <div class="reader-tools">
+      <span id="r-meta" class="muted small"></span>
+      <span class="grow"></span>
+      <button type="button" id="r-smaller" class="icon-btn sm" title="Smaller text" aria-label="Smaller text">A<small>−</small></button>
+      <button type="button" id="r-bigger" class="icon-btn sm" title="Bigger text" aria-label="Bigger text">A<small>+</small></button>
+      <button type="button" id="r-serif" class="icon-btn sm" title="Serif or sans-serif" aria-label="Toggle serif text">Aa</button>
+    </div>
+    <article id="article" class="article"></article>
+    <div id="r-empty" class="empty-state" hidden>
+      <h2>Nothing to read here</h2>
+      <p class="muted">Reading mode works on articles and other web pages with text.</p>
+    </div>
+    <div id="r-loading" class="sk" hidden><i></i><i></i><i class="short"></i><i></i><i class="short"></i></div>
+    <button type="button" id="r-ask" class="btn r-ask" hidden>
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5l1.6 4.4 4.4 1.6-4.4 1.6L10 14.5l-1.6-4.4L4 8.5l4.4-1.6z"/></svg>Ask AI about this article
+    </button>
+  </section>
+
+  <!-- ================= Share ================= -->
+  <section id="v-share" class="view share" hidden>
+    <div id="s-body">
+      <h2 id="s-title" class="s-title"></h2>
+      <div class="url-copy">
+        <input id="s-url" readonly aria-label="Page address">
+        <button type="button" id="s-copy" class="btn primary">Copy link</button>
+      </div>
+      <figure class="qr-card">
+        <img id="s-qr" alt="QR code for this page">
+        <figcaption class="muted small">Scan with a phone camera to open this page there.</figcaption>
+      </figure>
+      <button type="button" id="s-save" class="btn">Save QR code…</button>
+    </div>
+    <div id="s-empty" class="empty-state" hidden>
+      <h2>Nothing to share</h2>
+      <p class="muted">Open a web page to share its link or QR code.</p>
+    </div>
+  </section>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+  <script src="assets/theme.js"></script>
+  <script src="assets/markdown.js"></script>
+  <script src="assets/panel.js"></script>
+</body>
+</html>

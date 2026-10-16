@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: https:; style-src 'self'; script-src 'self'; font-src 'self'">
+<title>Settings</title>
+<link rel="stylesheet" href="assets/lantern.css">
+<link rel="stylesheet" href="assets/settings.css">
+</head>
+<body>
+  <header class="top">
+    <a class="wordmark" href="lantern://app/newtab.html"><img src="assets/icon.png" alt=""><span>Settings</span></a>
+    <label class="find">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg>
+      <input id="filter" type="search" placeholder="Search settings" aria-label="Search settings">
+    </label>
+  </header>
+
+  <div class="shell">
+    <nav class="side" aria-label="Settings sections">
+      <a href="#you" data-s="you"><svg viewBox="0 0 20 20"><circle cx="10" cy="7" r="3.2"/><path d="M3.8 16.5c1.2-3 3.5-4.4 6.2-4.4s5 1.4 6.2 4.4"/></svg>You and Lantern</a>
+      <a href="#privacy" data-s="privacy"><svg viewBox="0 0 20 20"><path d="M10 2.5 4 5v4.5c0 3.8 2.6 6.9 6 8 3.4-1.1 6-4.2 6-8V5z"/></svg>Privacy and security</a>
+      <a href="#ai" data-s="ai"><svg viewBox="0 0 20 20"><path d="M10 2.5l1.6 4.4 4.4 1.6-4.4 1.6L10 14.5l-1.6-4.4L4 8.5l4.4-1.6z"/></svg>AI assistant</a>
+      <a href="#search" data-s="search"><svg viewBox="0 0 20 20"><circle cx="8.5" cy="8.5" r="5"/><path d="m12.5 12.5 4 4"/></svg>Search engine</a>
+      <a href="#appearance" data-s="appearance"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="6.5"/><path d="M10 3.5v13a6.5 6.5 0 0 0 0-13z" fill="currentColor"/></svg>Appearance</a>
+      <a href="#startup" data-s="startup"><svg viewBox="0 0 20 20"><path d="M10 3v7M5.6 5.6a6.5 6.5 0 1 0 8.8 0"/></svg>On startup</a>
+      <a href="#performance" data-s="performance"><svg viewBox="0 0 20 20"><path d="M11 2.5 4.5 11H10l-1 6.5L15.5 9H10z"/></svg>Performance</a>
+      <a href="#extensions" data-s="extensions"><svg viewBox="0 0 20 20"><path d="M8 3.5h3v2a1.5 1.5 0 1 0 3 0v-2h2.5v4h-2a1.5 1.5 0 1 0 0 3h2v6H12v-2a1.5 1.5 0 1 0-3 0v2H3.5V11h2a1.5 1.5 0 1 0 0-3h-2V3.5H8z"/></svg>Extensions</a>
+      <a href="#downloads" data-s="downloads"><svg viewBox="0 0 20 20"><path d="M10 3.5v9M6 9l4 4 4-4M4.5 16h11"/></svg>Downloads</a>
+      <a href="#about" data-s="about"><svg viewBox="0 0 20 20"><path d="M7.5 3h5M7 5h6l-.6 10.5a1 1 0 0 1-1 .9H8.6a1 1 0 0 1-1-.9z"/></svg>About Lantern</a>
+    </nav>
+
+    <main class="content">
+      <!-- You and Lantern -->
+      <section id="you" class="section">
+        <h2>You and Lantern</h2>
+        <div class="card">
+          <div class="me">
+            <div id="me-avatar" class="big-avatar">P</div>
+            <div class="me-fields">
+              <label class="field-label" for="me-name">Profile name</label>
+              <input id="me-name" class="text" maxlength="40">
+              <div id="me-colors" class="swatches" role="radiogroup" aria-label="Profile color"></div>
+            </div>
+          </div>
+          <p class="note">Each profile keeps its own cookies, sign-ins, extensions and settings, so work and personal browsing never mix.</p>
+        </div>
+        <div class="card">
+          <div class="row head"><div><h3>Other profiles</h3></div><button id="add-profile" class="btn" type="button"><svg viewBox="0 0 20 20"><path d="M10 4v12M4 10h12"/></svg>Add profile</button></div>
+          <ul id="profiles" class="list"></ul>
+        </div>
+      </section>
+
+      <!-- Privacy -->
+      <section id="privacy" class="section">
+        <h2>Privacy and security</h2>
+        <div class="card safety">
+          <div class="row head">
+            <div><h3>Safety check</h3><p id="sc-when">Checks your protection settings, threat lists and extensions.</p></div>
+            <button id="sc-run" class="btn" type="button">Check now</button>
+          </div>
+          <ul id="sc-list" class="sc-list"></ul>
+        </div>
+        <div class="card">
+          <div class="row">
+            <div><h3>Dangerous site protection</h3><p>Warns you before scam and malware sites load. Lantern checks each address against open threat lists kept on your device, so the sites you visit aren't sent anywhere.</p></div>
+            <label class="switch"><input type="checkbox" data-setting="safeBrowsing"><span></span></label>
+          </div>
+          <div class="row">
+            <div><h3>Warn before risky downloads</h3><p>Asks before saving files that can run programs, or anything sent over an insecure connection. Downloaded files are also marked so your system checks them before they first open.</p></div>
+            <label class="switch"><input type="checkbox" data-setting="downloadWarnings"><span></span></label>
+          </div>
+        </div>
+        <div class="card">
+          <div class="row">
+            <div><h3>Block trackers and ads</h3><p>Stops known tracking scripts and ad networks before they load.</p></div>
+            <label class="switch"><input type="checkbox" data-setting="blockTrackers"><span></span></label>
+          </div>
+          <div class="row">
+            <div><h3>Block third-party cookies</h3><p>Sites can't read or set cookies on pages from other sites. A few sign-ins that rely on them may need a second try.</p></div>
+            <label class="switch"><input type="checkbox" data-setting="blockThirdPartyCookies"><span></span></label>
+          </div>
+          <div class="row">
+            <div><h3>Ask sites not to sell or share your data</h3><p>Sends Global Privacy Control and Do Not Track with every request.</p></div>
+            <label class="switch"><input type="checkbox" data-setting="sendGpc"><span></span></label>
+          </div>
+          <div class="row">
+            <div><h3>Always use secure connections</h3><p>Upgrades every site to HTTPS and falls back only when a site can't support it.</p></div>
+            <label class="switch"><input type="checkbox" data-setting="httpsOnly"><span></span></label>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="row">
+            <div><h3>Save browsing history</h3><p>Keeps a list of pages you visit on this device, for the History page and address bar suggestions. Private windows never save history.</p></div>
+            <label class="switch"><input type="checkbox" data-setting="saveHistory"><span></span></label>
+          </div>
+          <div class="row sub"><div><h4>History and bookmarks</h4></div><div class="btns"><a class="btn" href="lantern://app/library.html#history">History</a><a class="btn" href="lantern://app/library.html#bookmarks">Bookmarks</a></div></div>
+        </div>
+
+        <div class="card">
+          <div class="row"><div><h3>Clear browsing data</h3><p>Choose what to remove from this profile.</p></div></div>
+          <div class="checks">
+            <label><input type="checkbox" id="c-cookies" checked> Cookies and site data <span>Signs you out of most sites</span></label>
+            <label><input type="checkbox" id="c-cache" checked> Cached images and files</label>
+            <label><input type="checkbox" id="c-history"> Browsing history, recent searches and saved tabs</label>
+          </div>
+          <div class="row actions-row">
+            <span id="cleared" class="ok" hidden>Cleared</span>
+            <button id="clear-now" class="btn" type="button">Clear data</button>
+          </div>
+          <div class="row">
+            <div><h3>Clear everything when Lantern closes</h3><p>Every session starts fresh. You'll be signed out each time.</p></div>
+            <label class="switch"><input type="checkbox" data-setting="clearOnExit"><span></span></label>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="row"><div><h3>Site permissions</h3><p>What websites may ask to use.</p></div></div>
+          <div class="row sub"><div><h4>Camera</h4></div><select data-setting="camera"><option value="ask">Ask first</option><option value="block">Don't allow</option></select></div>
+          <div class="row sub"><div><h4>Microphone</h4></div><select data-setting="microphone"><option value="ask">Ask first</option><option value="block">Don't allow</option></select></div>
+          <div class="row sub"><div><h4>Notifications</h4></div><select data-setting="notifications"><option value="ask">Ask first</option><option value="block">Don't allow</option></select></div>
+          <div class="row sub"><div><h4>Location</h4></div><select data-setting="location"><option value="ask">Ask first</option><option value="block">Don't allow</option></select></div>
+          <div class="row sub"><div><h4>Remembered choices</h4><p id="perm-summary">None yet</p></div><button id="reset-perms" class="btn" type="button" hidden>Reset all</button></div>
+          <ul id="perm-list" class="list compact"></ul>
+        </div>
+      </section>
+
+      <!-- AI assistant -->
+      <section id="ai" class="section">
+        <h2>AI assistant</h2>
+        <div class="card">
+          <div class="row head">
+            <div><h3>API keys</h3><p id="ai-status">Add a key from Claude, ChatGPT, Gemini or Groq to use the AI assistant. Paste a key, say which service it's for, and Lantern sends your questions straight to that service.</p></div>
+            <button id="ai-keys" class="btn primary" type="button">Manage API keys</button>
+          </div>
+          <ul id="ai-list" class="ai-list"></ul>
+          <div class="row">
+            <div><h3>Show the AI button</h3><p>The button at the top right of the toolbar and on Lantern Search. Its arrow switches between your AI services.</p></div>
+            <label class="switch"><input type="checkbox" data-setting="showAiButton"><span></span></label>
+          </div>
+          <div class="explain">
+            <h4>How your keys are kept</h4>
+            <ol>
+              <li>Keys are encrypted with your system keychain and stored only in this profile, on this device.</li>
+              <li>A key is only ever sent to the service it belongs to. Lantern has no server in between.</li>
+              <li>When you ask about a page, its text goes to the service you picked along with your question. Turn off "This page" in the panel to stop that.</li>
+            </ol>
+          </div>
+        </div>
+      </section>
+
+      <!-- Search engine -->
+      <section id="search" class="section">
+        <h2>Search engine</h2>
+        <div class="card">
+          <div class="row">
+            <div><h3>Search engine used in the address bar</h3><p>Lantern Search gives a cited summary on top of its results.</p></div>
+            <select data-setting="searchEngine" id="engine"></select>
+          </div>
+          <div class="row">
+            <div><h3>Show summaries on Lantern Search</h3><p>Reads the top pages and quotes the key points, with sources. You can still summarize one search at a time when this is off.</p></div>
+            <label class="switch"><input type="checkbox" data-setting="summaryMode"><span></span></label>
+          </div>
+          <div class="row">
+            <div><h3>Search suggestions</h3><p>Suggests searches as you type in the address bar and search boxes. What you type is sent to DuckDuckGo without cookies; nothing is sent for web addresses.</p></div>
+            <label class="switch"><input type="checkbox" data-setting="searchSuggestions"><span></span></label>
+          </div>
+          <div class="row">
+            <div><h3>Complete addresses as you type</h3><p>Fills in sites from your history and bookmarks in the address bar, like typing "wik" for wikipedia.org.</p></div>
+            <label class="switch"><input type="checkbox" data-setting="inlineAutocomplete"><span></span></label>
+          </div>
+          <div class="row">
+            <div><h3>Mail link</h3><p>The Mail link at the top right of Lantern Search and the New Tab page.</p></div>
+            <select id="mail-service" aria-label="Mail service"></select>
+          </div>
+          <div class="url-row" id="mail-row" hidden>
+            <input id="mail-url" class="text" placeholder="https://mail.example.com" inputmode="url">
+            <button id="mail-save" class="btn" type="button">Save</button>
+            <span id="mail-msg" class="hint"></span>
+          </div>
+          <div class="row">
+            <div><h3>Remember recent searches</h3><p>Kept only on this device, in this profile. Turning this off forgets them. Clearing history also clears them.</p></div>
+            <label class="switch"><input type="checkbox" data-setting="rememberSearches"><span></span></label>
+          </div>
+          <div class="explain">
+            <h4>How Lantern Search works</h4>
+            <ol>
+              <li>Your search goes to DuckDuckGo's index, without cookies and with tracking protection on.</li>
+              <li>Lantern re-ranks the results on your device for variety and drops duplicates.</li>
+              <li>For summaries, Lantern reads the top pages and picks sentences that answer your question, citing each one.</li>
+            </ol>
+          </div>
+        </div>
+      </section>
+
+      <!-- Appearance -->
+      <section id="appearance" class="section">
+        <h2>Appearance</h2>
+        <div class="card">
+          <div class="row">
+            <div><h3>Theme</h3></div>
+            <div class="seg" role="radiogroup" aria-label="Theme" id="theme">
+              <button type="button" data-v="system">System</button><button type="button" data-v="light">Light</button><button type="button" data-v="dark">Dark</button>
+            </div>
+          </div>
+          <div class="row">
+            <div><h3>Theme colour</h3><p>Tints the browser frame, buttons and highlights.</p></div>
+            <div id="theme-colors" class="mini-themes" role="radiogroup" aria-label="Theme colour"></div>
+          </div>
+          <div class="row">
+            <div><h3>Your own colour</h3><p id="custom-note">Pick any colour. Lantern adjusts it for light and dark mode so text stays readable.</p></div>
+            <div class="custom-colour">
+              <span id="custom-preview" class="custom-preview" aria-hidden="true"><i></i><i></i><i></i></span>
+              <label class="color-pick" title="Choose a colour"><input type="color" id="custom-accent" aria-label="Your own theme colour"></label>
+            </div>
+          </div>
+          <div class="row">
+            <div><h3>Show bookmarks bar</h3><p>Your bookmarks under the address bar. Shortcut: <span id="kbd-bar">Ctrl+Shift+B</span>.</p></div>
+            <label class="switch"><input type="checkbox" data-setting="bookmarksBar"><span></span></label>
+          </div>
+          <div class="row">
+            <div><h3>New tab page</h3><p>Background, photo and shortcuts.</p></div>
+            <a class="btn" href="lantern://app/newtab.html#customize">Customize</a>
+          </div>
+          <div class="row">
+            <div><h3>Show home button</h3></div>
+            <label class="switch"><input type="checkbox" data-setting="showHomeButton"><span></span></label>
+          </div>
+          <div class="row">
+            <div><h3>Show Summary button</h3></div>
+            <label class="switch"><input type="checkbox" data-setting="toolbarSummary"><span></span></label>
+          </div>
+          <div class="row">
+            <div><h3>Show tracker counter</h3><p>The shield in the address bar that counts blocked trackers.</p></div>
+            <label class="switch"><input type="checkbox" data-setting="toolbarShield"><span></span></label>
+          </div>
+          <div class="row">
+            <div><h3>Page zoom</h3><p>The starting zoom for websites. You can still zoom each page.</p></div>
+            <select data-setting="defaultZoom" data-type="number">
+              <option value="0.75">75%</option><option value="0.9">90%</option><option value="1">100%</option><option value="1.1">110%</option><option value="1.25">125%</option><option value="1.5">150%</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <!-- On startup -->
+      <section id="startup" class="section">
+        <h2>On startup</h2>
+        <div class="card radios">
+          <label class="radio"><input type="radio" name="startup" value="newtab"><span><b>Open the New Tab page</b></span></label>
+          <label class="radio"><input type="radio" name="startup" value="continue"><span><b>Continue where you left off</b><small>Lantern saves your tabs every 30 seconds, so they survive a crash too.</small></span></label>
+          <label class="radio"><input type="radio" name="startup" value="url"><span><b>Open a specific page</b></span></label>
+          <div class="url-row" id="url-row" hidden>
+            <input id="startup-url" class="text" placeholder="https://example.com" inputmode="url">
+            <button id="save-url" class="btn" type="button">Save</button>
+            <span id="url-msg" class="hint"></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Performance -->
+      <section id="performance" class="section">
+        <h2>Performance</h2>
+        <div class="card">
+          <div class="row">
+            <div><h3>Memory saver</h3><p>Tabs you haven't used for 30 minutes go to sleep and give their memory back. They reload when you click them. Tabs playing audio stay awake.</p></div>
+            <label class="switch"><input type="checkbox" data-setting="memorySaver"><span></span></label>
+          </div>
+        </div>
+      </section>
+
+      <!-- Extensions -->
+      <section id="extensions" class="section">
+        <h2>Extensions</h2>
+        <div class="card">
+          <div class="row head">
+            <div><h3>Installed</h3><p>Add extensions from the Chrome Web Store with its <b>Add to Chrome</b> button. They're installed only in this profile.</p></div>
+            <div class="btns">
+              <button id="store" class="btn primary" type="button">Chrome Web Store</button>
+              <button id="unpacked" class="btn" type="button">Load unpacked</button>
+            </div>
+          </div>
+          <ul id="ext-list" class="ext-list"></ul>
+          <p id="ext-empty" class="empty">No extensions yet. Popular ones like password managers, dark mode and grammar checkers work in Lantern.</p>
+          <p id="ext-off" class="empty" hidden>Extensions couldn't start in this profile.</p>
+        </div>
+      </section>
+
+      <!-- Downloads -->
+      <section id="downloads" class="section">
+        <h2>Downloads</h2>
+        <div class="card">
+          <div class="row">
+            <div><h3>Location</h3><p id="dl-path" class="mono"></p></div>
+            <button id="dl-change" class="btn" type="button">Change</button>
+          </div>
+          <div class="row">
+            <div><h3>Ask where to save each file</h3></div>
+            <label class="switch"><input type="checkbox" data-setting="downloadsAsk"><span></span></label>
+          </div>
+        </div>
+      </section>
+
+      <!-- About -->
+      <section id="about" class="section">
+        <h2>About Lantern</h2>
+        <div class="card about">
+          <img src="assets/icon.png" alt="" class="about-icon">
+          <div>
+            <h3>Lantern <span id="v-lantern"></span></h3>
+            <p id="v-engine" class="mono"></p>
+            <p>Lantern is free and open source under the GPL-3.0 license. It sends nothing about your browsing to anyone.</p>
+            <h4>Hardened build</h4>
+            <ul class="bullets">
+              <li>Can't be relaunched as a plain Node.js process or debugged by other apps</li>
+              <li>Ignores code injected through environment variables</li>
+              <li>Loads only its own signed-off app archive, checked for tampering on Mac</li>
+              <li>Encrypts saved cookies and sign-ins with your system keychain</li>
+              <li>Warns before scam and malware sites, using threat lists checked on your device</li>
+              <li>Marks downloads so macOS Gatekeeper and Windows SmartScreen check them before they run</li>
+              <li>Every website runs in its own sandboxed process (site isolation)</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+      <p id="no-match" class="empty" hidden>No settings match your search.</p>
+    </main>
+  </div>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <script src="assets/theme.js"></script>
+  <script src="assets/settings.js"></script>
+</body>
+</html>

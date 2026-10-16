@@ -1,0 +1,38 @@
+:root {
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif;
+  --card: #ffffff; --fg: #1f2328; --muted: #5f6570; --hover: #f1f3f5; --sel: #e9edf3; --line: rgba(0,0,0,.08);
+  --accent: #d9650a;
+}
+body.dark { --card: #26282d; --fg: #e8eaed; --muted: #a3a9b3; --hover: #303338; --sel: #383b42; --line: rgba(255,255,255,.08); }
+* { box-sizing: border-box; }
+html, body { margin: 0; background: transparent; overflow: hidden; }
+body { padding: 10px; font: 14px/1.2 var(--font); color: var(--fg); user-select: none; -webkit-user-select: none; }
+.list {
+  list-style: none; margin: 0; padding: 6px 0; background: var(--card); border-radius: 0 0 16px 16px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.16), 0 1px 3px rgba(0,0,0,.10); border: 1px solid var(--line); border-top: 0;
+  animation: drop .16s cubic-bezier(.2,.8,.2,1);
+}
+@keyframes drop { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.row { height: 40px; display: flex; align-items: center; gap: 12px; padding: 0 10px 0 14px; cursor: default; position: relative; }
+.row:hover { background: var(--hover); }
+.row.sel { background: var(--sel); }
+.row.sel::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px; border-radius: 0 3px 3px 0; background: var(--accent); }
+.ic { width: 20px; height: 20px; flex: none; display: grid; place-items: center; color: var(--muted); }
+.ic svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.text b { font-weight: 650; }
+.text .typed { font-weight: 400; }
+.sub { color: var(--muted); font-size: 13px; margin-left: 6px; }
+.sub.link { color: var(--accent); }
+.tag {
+  flex: none; font-size: 12px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 3px 9px;
+}
+.x {
+  flex: none; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; color: var(--muted); visibility: hidden;
+}
+.row:hover .x, .row.sel .x { visibility: visible; }
+.x:hover { background: var(--line); color: var(--fg); }
+.x svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+.head { padding: 8px 14px 4px; font-size: 12px; font-weight: 600; color: var(--muted); letter-spacing: .02em; }
+.row.ai .ic { color: var(--accent, #e2700c); }
+.row.ai .tag { color: var(--accent, #e2700c); border-color: color-mix(in srgb, var(--accent, #e2700c) 40%, transparent); }

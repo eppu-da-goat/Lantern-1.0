@@ -1,0 +1,29 @@
+/* Warning pages: a strong single colour field so danger reads instantly, calm type so it reads clearly. */
+body { min-height: 100vh; display: grid; place-items: center; transition: background-color .4s var(--ease); }
+body.danger { --tone: #c62828; --tone-soft: rgba(198, 40, 40, 0.10); background: color-mix(in srgb, var(--bg) 88%, #c62828 12%); }
+body.cert { --tone: #c2410c; --tone-soft: rgba(194, 65, 12, 0.10); background: color-mix(in srgb, var(--bg) 90%, #c2410c 10%); }
+body.crash { --tone: var(--muted); --tone-soft: var(--bg-2); background: var(--bg); }
+@media (prefers-color-scheme: dark) {
+  body.danger { --tone: #ff6b6b; background: color-mix(in srgb, var(--bg) 82%, #b91c1c 18%); }
+  body.cert { --tone: #fb923c; background: color-mix(in srgb, var(--bg) 85%, #c2410c 15%); }
+}
+.page { width: min(640px, 100% - 40px); padding: 10vh 0; display: grid; gap: 16px; }
+.mark { width: 76px; height: 76px; border-radius: 22px; display: grid; place-items: center; background: var(--tone-soft); color: var(--tone); margin-bottom: 8px; }
+.mark svg { width: 46px; height: 46px; fill: none; stroke: currentColor; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; }
+body.danger .mark { animation: rise .7s var(--ease) both, pulse-ring 2.4s var(--ease) .8s infinite; }
+@keyframes pulse-ring { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--tone) 35%, transparent); } 70%, 100% { box-shadow: 0 0 0 18px transparent; } }
+h1 { font: 700 clamp(30px, 4.4vw, 44px)/1.08 var(--display); letter-spacing: -0.03em; }
+.lede { margin: 0; font-size: 17px; line-height: 1.6; color: var(--fg); max-width: 56ch; }
+.site { margin: 0; }
+.site span { display: inline-block; font: 600 14px ui-monospace, SFMono-Regular, Menlo, monospace; padding: 5px 12px; border-radius: 999px; background: var(--tone-soft); color: var(--tone); overflow-wrap: anywhere; }
+.actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 12px; }
+.btn.big { height: 44px; padding: 0 24px; border-radius: 22px; font-size: 15px; }
+.link { border: 0; background: transparent; color: var(--muted); font-weight: 600; cursor: pointer; padding: 8px 10px; border-radius: 10px; font-size: 14px; }
+.link:hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 7%, transparent); }
+.link.danger { color: var(--tone); padding-left: 0; }
+.link.danger:hover { background: transparent; text-decoration: underline; text-underline-offset: 3px; }
+.details { border-top: 1px solid var(--line); padding-top: 16px; display: grid; gap: 10px; animation: rise .4s var(--ease) both; }
+.details p { margin: 0; color: var(--muted); font-size: 14.5px; line-height: 1.6; }
+.details .code { font: 12.5px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--faint); }
+.details .code:empty { display: none; }
+.details button { justify-self: start; }

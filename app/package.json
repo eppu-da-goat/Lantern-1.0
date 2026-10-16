@@ -1,0 +1,86 @@
+{
+  "name": "lantern-browser",
+  "productName": "Lantern",
+  "version": "1.5.1",
+  "description": "Lantern, a private browser with Lantern Search, cited summaries, an AI side panel (Claude, ChatGPT, Gemini, Groq), profiles and Chrome extensions.",
+  "main": "src/main.js",
+  "license": "GPL-3.0",
+  "author": "Lantern",
+  "scripts": {
+    "start": "electron .",
+    "core": "LANTERN_BUILD_STD=1 ../build/build-core.sh",
+    "dist:win": "electron-builder --win nsis --x64",
+    "dist:mac": "electron-builder --mac dir --universal"
+  },
+  "dependencies": {
+    "@ghostery/adblocker-electron": "2.20.1",
+    "@mozilla/readability": "0.6.0",
+    "electron-chrome-extensions": "4.9.0",
+    "electron-chrome-web-store": "0.13.0",
+    "linkedom": "0.18.13"
+  },
+  "devDependencies": {
+    "@electron/fuses": "2.1.3",
+    "electron": "44.7.2",
+    "electron-builder": "26.0.12",
+    "pe-library": "^1.0.1",
+    "resedit": "^2.0.3"
+  },
+  "build": {
+    "appId": "app.lantern.browser",
+    "productName": "Lantern",
+    "copyright": "Lantern \u00b7 GPL-3.0",
+    "asar": true,
+    "files": [
+      "src/**/*",
+      "package.json",
+      "LICENSE"
+    ],
+    "electronFuses": {
+      "runAsNode": false,
+      "enableCookieEncryption": true,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "enableEmbeddedAsarIntegrityValidation": true,
+      "onlyLoadAppFromAsar": true
+    },
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "build/icon.icns",
+      "minimumSystemVersion": "13.0",
+      "identity": null,
+      "extendInfo": {
+        "NSHumanReadableCopyright": "Lantern \u00b7 GPL-3.0",
+        "CFBundleURLTypes": [
+          {
+            "CFBundleURLName": "Web site URL",
+            "CFBundleURLSchemes": [
+              "http",
+              "https"
+            ]
+          }
+        ]
+      }
+    },
+    "win": {
+      "icon": "build/icon.ico",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Lantern",
+      "artifactName": "Lantern-Setup-${version}.exe",
+      "license": "LICENSE"
+    },
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "afterPack": "build/after-pack.js",
+    "publish": []
+  }
+}

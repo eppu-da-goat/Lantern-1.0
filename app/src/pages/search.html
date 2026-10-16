@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https: data:; style-src 'self'; script-src 'self'; font-src 'self'">
+<title>Lantern Search</title>
+<link rel="stylesheet" href="assets/lantern.css">
+<link rel="stylesheet" href="assets/search.css">
+</head>
+<body>
+  <div class="glow" aria-hidden="true"></div>
+
+  <header class="bar">
+    <div class="bar-row">
+      <a class="wordmark" href="lantern://app/newtab.html"><img src="assets/icon.png" alt=""><span>Lantern</span></a>
+      <form id="ask" class="pill mini" role="search" autocomplete="off">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg>
+        <input id="q" aria-label="Search">
+        <button type="button" id="clear" class="clear" aria-label="Clear search"><svg viewBox="0 0 20 20"><path d="M6 6l8 8M14 6l-8 8"/></svg></button>
+      </form>
+      <div class="toplinks-slot" data-toplinks></div>
+    </div>
+    <nav class="tabs" aria-label="Result types">
+      <a class="tab current" id="t-all" href="#" aria-current="page">All</a>
+      <a class="tab" id="t-images" href="#">Images <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4h6v6M12 4 5 11"/></svg></a>
+      <a class="tab" id="t-news" href="#">News <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4h6v6M12 4 5 11"/></svg></a>
+      <a class="tab" id="t-videos" href="#">Videos <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4h6v6M12 4 5 11"/></svg></a>
+      <a class="tab" id="t-maps" href="#">Maps <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4h6v6M12 4 5 11"/></svg></a>
+      <span class="spacer"></span>
+      <button type="button" id="sum-toggle" class="sum-toggle" aria-pressed="true">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5l1.6 4.4 4.4 1.6-4.4 1.6L10 14.5l-1.6-4.4L4 8.5l4.4-1.6z"/></svg>Summary
+      </button>
+    </nav>
+  </header>
+
+  <main class="layout">
+    <div class="col">
+      <!-- Summary -->
+      <section id="summary" class="summary" hidden aria-live="polite">
+        <div class="summary-head">
+          <p class="eyebrow"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5l1.6 4.4 4.4 1.6-4.4 1.6L10 14.5l-1.6-4.4L4 8.5l4.4-1.6z"/></svg>Summary</p>
+          <span id="sum-step" class="step"></span>
+        </div>
+        <div id="sum-loading" class="sum-loading" aria-hidden="true"><i></i><i></i><i class="short"></i></div>
+        <div id="sum-body" class="sum-body" hidden>
+          <p id="overview" class="lede"></p>
+          <ul id="points" class="points"></ul>
+          <button type="button" id="more-points" class="more-points" hidden>Show more <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 7.5 10 12.5l5-5"/></svg></button>
+          <div id="sum-sources" class="sum-sources"></div>
+          <p class="sum-note">Quoted from the pages above. Check them before relying on it.</p>
+        </div>
+        <p id="sum-error" class="sum-error" hidden></p>
+      </section>
+      <button type="button" id="summarize" class="summarize" hidden>
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5l1.6 4.4 4.4 1.6-4.4 1.6L10 14.5l-1.6-4.4L4 8.5l4.4-1.6z"/></svg>
+        Summarize the top results
+      </button>
+
+      <div id="answer" class="answer" hidden></div>
+
+      <!-- Results -->
+      <ol id="results" class="results" aria-label="Search results"></ol>
+      <div id="res-loading" class="res-loading" aria-hidden="true">
+        <div><i class="s"></i><i></i><i class="l"></i></div><div><i class="s"></i><i></i><i class="l"></i></div><div><i class="s"></i><i></i><i class="l"></i></div>
+      </div>
+      <div class="pager">
+        <button type="button" id="more" class="btn" hidden>More results</button>
+        <a id="on-ddg" class="ddg-link" href="#">See these results on DuckDuckGo</a>
+      </div>
+      <section id="related-wrap" class="related" hidden>
+        <h2>People also search for</h2>
+        <div id="related" class="chips"></div>
+      </section>
+      <div id="error" class="error" hidden>
+        <h2>Lantern couldn't search right now.</h2>
+        <p id="error-msg"></p>
+        <div class="actions"><button id="retry" class="btn primary" type="button">Try again</button></div>
+      </div>
+      <p class="about-results">Results come from DuckDuckGo's index and are re-ranked by Lantern on your device. Lantern doesn't log or share your searches.</p>
+    </div>
+
+    <aside id="panel" class="panel" hidden>
+      <img id="panel-img" class="panel-img" alt="" hidden>
+      <h2 id="panel-title"></h2>
+      <p id="panel-text"></p>
+      <dl id="panel-facts" class="facts"></dl>
+      <a id="panel-link" class="panel-link" href="#"></a>
+    </aside>
+  </main>
+  <script src="assets/theme.js"></script>
+  <script src="assets/suggest.js"></script>
+  <script src="assets/search.js"></script>
+  <script src="assets/toplinks.js"></script>
+</body>
+</html>

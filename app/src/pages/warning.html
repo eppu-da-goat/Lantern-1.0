@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; font-src 'self'">
+<title>Warning</title>
+<link rel="stylesheet" href="assets/lantern.css">
+<link rel="stylesheet" href="assets/warning.css">
+</head>
+<body>
+  <main id="page" class="page">
+    <div class="mark rise" data-i="0" aria-hidden="true">
+      <svg id="icon-danger" viewBox="0 0 64 64" hidden><path d="M32 6 4 56h56z"/><path d="M32 24v14M32 46v.5"/></svg>
+      <svg id="icon-lock" viewBox="0 0 64 64" hidden><rect x="14" y="28" width="36" height="28" rx="6"/><path d="M22 28v-6a10 10 0 0 1 20 0v6"/><path d="M26 40l12 8M38 40l-12 8"/></svg>
+      <svg id="icon-crash" viewBox="0 0 64 64" hidden><rect x="8" y="12" width="48" height="40" rx="8"/><path d="M8 22h48"/><path d="M22 34l6 6M28 34l-6 6M36 34l6 6M42 34l-6 6"/></svg>
+    </div>
+    <h1 id="title" class="rise" data-i="1"></h1>
+    <p id="lede" class="lede rise" data-i="2"></p>
+    <p class="site rise" data-i="3"><span id="host"></span></p>
+
+    <div class="actions rise" data-i="4">
+      <button id="primary" class="btn primary big" type="button"></button>
+      <button id="details-toggle" class="link" type="button" aria-expanded="false">Details</button>
+    </div>
+
+    <section id="details" class="details" hidden>
+      <p id="detail-text"></p>
+      <p class="code" id="code"></p>
+      <button id="proceed" class="link danger" type="button"></button>
+    </section>
+  </main>
+  <script src="assets/theme.js"></script>
+  <script src="assets/warning.js"></script>
+</body>
+</html>
