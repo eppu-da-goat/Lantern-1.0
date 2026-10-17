@@ -66,7 +66,7 @@
       </div>
       <div class="pager">
         <button type="button" id="more" class="btn" hidden>More results</button>
-        <a id="on-ddg" class="ddg-link" href="#">See these results on DuckDuckGo</a>
+        <a id="elsewhere" class="ddg-link" href="#">Try this search on Mojeek</a>
       </div>
       <section id="related-wrap" class="related" hidden>
         <h2>People also search for</h2>
@@ -77,7 +77,8 @@
         <p id="error-msg"></p>
         <div class="actions"><button id="retry" class="btn primary" type="button">Try again</button></div>
       </div>
-      <p class="about-results">Results come from DuckDuckGo's index and are re-ranked by Lantern on your device. Lantern doesn't log or share your searches.</p>
+      <p class="about-results" id="about-results">Lantern Search asks independent sources at once (pages you've visited, Wikipedia, Mwmbl and Marginalia, plus Brave or Mojeek if you add a key) and ranks the answers itself, on your device. Nothing is logged, and no cookies are sent. <a href="lantern://app/settings.html#search">Search settings</a></p>
+      <p class="about-results" id="sources-line"></p>
     </div>
 
     <aside id="panel" class="panel" hidden>
@@ -90,6 +91,7 @@
   </main>
   <script src="assets/theme.js"></script>
   <script src="assets/suggest.js"></script>
+  <script src="assets/answers.js"></script>
   <script src="assets/search.js"></script>
   <script src="assets/toplinks.js"></script>
 </body>

@@ -1,6 +1,6 @@
 [package]
 name = "lantern-core"
-version = "1.6.0"
+version = "1.7.0"
 edition = "2021"
 license = "GPL-3.0"
 description = "Lantern's Rust core: AI provider requests and streaming, theme palettes, settings validation, omnibox ranking, mail links and QR codes. Compiled to WebAssembly and loaded by the Electron main process."

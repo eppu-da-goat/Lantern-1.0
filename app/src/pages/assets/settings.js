@@ -597,3 +597,58 @@
     setInterval(() => { if (!document.hidden) { renderServices(); } }, 5000);
   })();
 })();
+
+
+// ---------- 1.7: Lantern Search sources, page index and keys ----------
+(() => {
+  const api = window.lantern;
+  if (!api || !api.searchState || !document.getElementById('search-sources')) return;
+  const $ = (id) => document.getElementById(id);
+  const make = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; };
+  const clean = (err) => String(err && err.message || err).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+  const SOURCES = [
+    ['local', 'Your pages', 'The pages you have visited, from the index on this computer.'],
+    ['wikipedia', 'Wikipedia', 'In the language of your search (Malayalam, Hindi, Tamil and more).'],
+    ['mwmbl', 'Mwmbl', 'A free, open web index built by its community.'],
+    ['marginalia', 'Marginalia', 'An independent index of the personal, non-commercial web.'],
+  ];
+  async function render() {
+    const st = await api.searchState();
+    $('idx-count').textContent = st.index.available ? `Your page index: ${st.index.pages.toLocaleString()} page${st.index.pages === 1 ? '' : 's'}` : 'Your page index is unavailable on this system';
+    $('idx-hint').textContent = st.index.on ? 'Stored only on this computer.' : 'Paused. Pages you open now are not added.';
+    const list = $('src-list'); list.textContent = '';
+    for (const [id, name, desc] of SOURCES) {
+      const li = make('li');
+      const sw = make('label', 'switch');
+      const cb = make('input'); cb.type = 'checkbox'; cb.checked = st.sources[id] !== false;
+      cb.addEventListener('change', async () => { try { await api.setSetting('searchSources', { ...st.sources, [id]: cb.checked }); } catch (e) { cb.checked = !cb.checked; } render(); });
+      sw.append(cb, make('span'));
+      li.append(make('span', 'grow', `${name} — ${desc}`), sw);
+      list.append(li);
+    }
+    const keys = $('key-list'); keys.textContent = '';
+    for (const k of st.keys) {
+      const li = make('li');
+      if (k.mask) {
+        li.append(make('span', 'grow', `${k.name} — key ${k.mask}`));
+        const rm = make('button', 'btn', 'Remove'); rm.type = 'button';
+        rm.addEventListener('click', async () => { await api.searchKeyRemove(k.id); render(); });
+        li.append(rm);
+      } else {
+        const input = make('input', 'text'); input.type = 'password'; input.placeholder = `${k.name} key`; input.style.flex = '1';
+        const a = make('a', '', 'Get a key'); a.href = k.url; a.target = '_blank';
+        const save = make('button', 'btn', 'Add'); save.type = 'button';
+        const msg = make('span', 'hint');
+        save.addEventListener('click', async () => {
+          save.disabled = true; msg.textContent = 'Checking…';
+          try { await api.searchKey(k.id, input.value); render(); } catch (e) { msg.textContent = clean(e); save.disabled = false; }
+        });
+        li.append(input, a, save, msg);
+      }
+      keys.append(li);
+    }
+  }
+  $('idx-clear').addEventListener('click', async () => { await api.searchIndexClear(); render(); });
+  document.querySelector('[data-setting="indexPages"]').addEventListener('change', () => setTimeout(render, 200));
+  render().catch(() => {});
+})();

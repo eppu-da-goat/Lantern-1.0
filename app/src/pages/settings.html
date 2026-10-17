@@ -206,7 +206,7 @@
             <label class="switch"><input type="checkbox" data-setting="summaryMode"><span></span></label>
           </div>
           <div class="row">
-            <div><h3>Search suggestions</h3><p>Suggests searches as you type in the address bar and search boxes. What you type is sent to DuckDuckGo without cookies; nothing is sent for web addresses.</p></div>
+            <div><h3>Search suggestions</h3><p>Suggests searches as you type in the address bar and search boxes, from your own pages and Wikipedia's titles. What you type is sent to Wikipedia without cookies; nothing is sent for web addresses.</p></div>
             <label class="switch"><input type="checkbox" data-setting="searchSuggestions"><span></span></label>
           </div>
           <div class="row">
@@ -229,11 +229,24 @@
           <div class="explain">
             <h4>How Lantern Search works</h4>
             <ol>
-              <li>Your search goes to DuckDuckGo's index, without cookies and with tracking protection on.</li>
-              <li>Lantern re-ranks the results on your device for variety and drops duplicates.</li>
+              <li>Your search goes to several independent sources at once, without cookies: your own page index on this computer, Wikipedia, Mwmbl and Marginalia, plus Brave Search or Mojeek if you add a key below.</li>
+              <li>Lantern's own ranking, in its Rust core, merges them on your device: a page found by several sources rises, your words are matched against titles and text, and no single site fills the top.</li>
+              <li>Sums, conversions, time zones and dates are answered on the page before anything is fetched.</li>
               <li>For summaries, Lantern reads the top pages and picks sentences that answer your question, citing each one.</li>
             </ol>
           </div>
+        </div>
+
+        <div class="card" id="search-sources">
+          <div class="row">
+            <div><h3>Remember the pages I visit for search</h3><p>Lantern keeps the text of pages you open in a search index on this computer, so Lantern Search can find them again. Never in private windows, never pages with a password box, mail, sign-in or banking pages. Clearing history clears it.</p></div>
+            <label class="switch"><input type="checkbox" data-setting="indexPages"><span></span></label>
+          </div>
+          <div class="row sub"><div><h4 id="idx-count">Your page index</h4><p class="hint" id="idx-hint"></p></div><button id="idx-clear" class="btn" type="button">Clear index</button></div>
+          <div class="row sub"><div><h4>Sources</h4><p class="hint">Turn off any you don't want asked.</p></div></div>
+          <ul id="src-list" class="simple-list" style="margin: 0 20px 12px"></ul>
+          <div class="row sub"><div><h4>Results from the whole web (optional)</h4><p class="hint">Mwmbl and Marginalia are free, open indexes, but smaller than the big engines. Add your own Brave Search API key (it has a free plan) or a Mojeek key for full-web results. Keys are encrypted with your system keychain.</p></div></div>
+          <ul id="key-list" class="simple-list" style="margin: 0 20px 16px"></ul>
         </div>
       
         <div class="card">

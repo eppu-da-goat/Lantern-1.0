@@ -79,4 +79,9 @@ module.exports = {
   cleanUrl: (url) => call('url.clean', { url }),
   rank: (query, items, { now = Date.now(), limit = 8 } = {}) => call('rank.entries', { query, items, now, limit }),
   qr: (text, dark, light) => call('qr.svg', { text, dark, light }),
+  websearch: {
+    fuse: (query, lists, { seen = [], limit = 30 } = {}) => call('search.fuse', { query, lists, seen, limit }),
+    ftsQuery: (query) => call('search.ftsQuery', { query }),
+    urlKey: (url) => call('search.urlKey', { url }),
+  },
 };

@@ -13,6 +13,7 @@ pub mod qr;
 pub mod rank;
 pub mod settings;
 pub mod theme;
+pub mod websearch;
 
 use serde_json::{json, Value};
 
@@ -54,6 +55,10 @@ pub fn dispatch(input: &[u8]) -> Value {
         "url.clean" => Ok(cleanurl::clean(s(a, "url"))),
         // Omnibox and library
         "rank.entries" => Ok(rank::rank(a)),
+        // Lantern Search: merge and rank results from independent sources
+        "search.fuse" => Ok(websearch::fuse(a)),
+        "search.ftsQuery" => Ok(websearch::fts_query(s(a, "query"))),
+        "search.urlKey" => Ok(json!(websearch::url_key(s(a, "url")))),
         "qr.svg" => qr::svg(s(a, "text"), s(a, "dark"), s(a, "light")),
         _ => Err(format!("unknown function: {f}")),
     };

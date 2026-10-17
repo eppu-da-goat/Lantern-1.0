@@ -8,6 +8,8 @@ const COLORS = ['#e2700c', '#2f6fdf', '#1f9d6b', '#c2410c', '#8b5cf6', '#db2777'
 
 const DEFAULT_SETTINGS = {
   searchEngine: 'lantern',
+  indexPages: true,
+  searchSources: {},
   summaryMode: true,
   searchSuggestions: true,
   rememberSearches: true,
@@ -67,7 +69,7 @@ const DEFAULT_SETTINGS = {
 
 const ENGINES = {
   lantern: { name: 'Lantern Search', url: 'lantern://app/search.html?q=%s' },
-  duckduckgo: { name: 'DuckDuckGo', url: 'https://duckduckgo.com/?q=%s' },
+  mojeek: { name: 'Mojeek', url: 'https://www.mojeek.com/search?q=%s' },
   brave: { name: 'Brave Search', url: 'https://search.brave.com/search?q=%s' },
   startpage: { name: 'Startpage', url: 'https://www.startpage.com/do/search?q=%s' },
   ecosia: { name: 'Ecosia', url: 'https://www.ecosia.org/search?q=%s' },

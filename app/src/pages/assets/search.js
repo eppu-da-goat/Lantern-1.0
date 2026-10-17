@@ -5,17 +5,28 @@
   const params = new URLSearchParams(location.search);
   const query = (params.get('q') || '').trim();
   const forceSummary = params.get('summary') === '1';
-  const ddg = (extra = '') => 'https://duckduckgo.com/?q=' + encodeURIComponent(query) + extra;
-  const favicon = (host) => host ? `https://icons.duckduckgo.com/ip3/${encodeURIComponent(host)}.ico` : '';
+  const enc = encodeURIComponent(query);
+  // A coloured letter for each site instead of fetching its icon from a third party.
+  const hue = (s) => { let n = 0; for (const c of String(s)) n = (n * 31 + c.charCodeAt(0)) >>> 0; return n % 360; };
+  function mono(host) {
+    const name = String(host || '?').replace(/^www\./, '');
+    const m = document.createElement('span');
+    m.className = 'mono';
+    m.textContent = (name.split('.').length > 2 && name.split('.')[0].length > 3 ? name : name.split('.').slice(-2)[0] || name).charAt(0).toUpperCase();
+    m.style.background = `hsl(${hue(name)} 50% 42%)`;
+    m.setAttribute('aria-hidden', 'true');
+    return m;
+  }
 
   document.title = query ? `${query} · Lantern Search` : 'Lantern Search';
   $('q').value = query;
   $('t-all').href = location.href;
-  $('t-images').href = ddg('&iax=images&ia=images');
-  $('t-news').href = ddg('&iar=news&ia=news');
-  $('t-videos').href = ddg('&iax=videos&ia=videos');
-  $('t-maps').href = ddg('&iaxm=maps&ia=web');
-  $('on-ddg').href = ddg();
+  // Other kinds of results go to open or specialist sources.
+  $('t-images').href = 'https://openverse.org/search/image?q=' + enc;
+  $('t-news').href = 'https://news.google.com/search?q=' + enc;
+  $('t-videos').href = 'https://www.youtube.com/results?search_query=' + enc;
+  $('t-maps').href = 'https://www.openstreetmap.org/search?query=' + enc;
+  $('elsewhere').href = 'https://www.mojeek.com/search?q=' + enc;
 
   function el(tag, cls, text) {
     const n = document.createElement(tag);
@@ -53,6 +64,7 @@
     } catch { return url; }
   }
   function siteName(host) {
+    if (/^[\d.]+$|^\[/.test(host) || !host.includes('.')) return host;
     const base = host.replace(/^www\./, '').split('.');
     const name = base.length > 2 && base[0].length > 3 ? base[0] : base[base.length - 2] || host;
     return name.charAt(0).toUpperCase() + name.slice(1);
@@ -70,14 +82,10 @@
       const a = el('a');
       a.href = r.url;
       const host = el('span', 'host');
-      const img = el('img');
-      img.alt = '';
-      img.loading = 'lazy';
-      img.src = favicon(r.host);
-      img.onerror = () => { img.style.visibility = 'hidden'; };
       const site = el('span', 'site');
       site.append(el('span', 'name', siteName(r.host)), el('span', 'path', pathCrumb(r.url)));
-      host.append(img, site);
+      host.append(mono(r.host), site);
+      for (const s of r.sources || []) host.appendChild(el('span', s === 'Your pages' ? 'from mine' : 'from', s === 'Your pages' ? 'Visited' : s));
       a.append(host, el('span', 't', r.title));
       if (r.snippet) a.appendChild(el('span', 's', r.snippet));
       li.appendChild(a);
@@ -121,8 +129,26 @@
   function friendlyError(err) {
     const msg = String((err && err.message) || err || '');
     return /fetch|network|net::|ERR_|ENOTFOUND|ECONN|abort|timed? ?out|HTTP/i.test(msg)
-      ? "DuckDuckGo couldn't be reached. Check your internet connection and try again."
+      ? "Lantern Search couldn't reach its sources. Check your internet connection and try again."
       : 'Something went wrong while reading the results. Try again in a moment.';
+  }
+
+  function showSources(list, ms) {
+    if (!list) return;
+    const ok = list.filter((s) => s.ok && s.count);
+    $('sources-line').textContent = ok.length
+      ? `Results from ${ok.map((s) => `${s.name} (${s.count})`).join(', ')} · ${((ms || 0) / 1000).toFixed(1)}s` + (ok.some((s) => s.id === 'marginalia') ? ' · Marginalia results are CC BY-NC-SA.' : '')
+      : '';
+  }
+  // Sums, conversions, time zones and dates are answered right here, before anything is fetched.
+  if (window.LanternAnswers && query) {
+    const a = window.LanternAnswers.answer(query);
+    if (a) {
+      const box = $('answer');
+      box.hidden = false;
+      box.replaceChildren(el('span', 'eq', a.eq + ' '), el('b', 'val', a.val));
+      if (a.note) box.appendChild(el('span', 'note', a.note));
+    }
   }
 
   async function runSearch() {
@@ -130,13 +156,13 @@
       const data = await api.search(query);
       $('res-loading').hidden = true;
       next = data.next;
-      if (data.answer) { $('answer').hidden = false; $('answer').textContent = data.answer; }
+      showSources(data.sources, data.tookMs);
       renderResults(data.results, false);
       renderPanel(data.panel);
       renderRelated(data.related);
       $('more').hidden = !next;
       if (!data.results.length) {
-        $('results').appendChild(el('li', 'result', `No results for “${query}”. Try different words, or search DuckDuckGo directly.`));
+        $('results').appendChild(el('li', 'result', `No results for “${query}”. Try different words, or add a Brave Search key in Settings for results from the whole web.`));
       }
     } catch (err) {
       $('res-loading').hidden = true;
@@ -225,11 +251,7 @@
       const a = el('a', 'src');
       a.href = s.url;
       a.dataset.i = i;
-      const img = el('img');
-      img.alt = '';
-      img.src = favicon(s.host);
-      img.onerror = () => { img.style.visibility = 'hidden'; };
-      a.append(img, el('span', 'n', String(i + 1)), el('span', '', s.site || s.host));
+      a.append(mono(s.host), el('span', 'n', String(i + 1)), el('span', '', s.site || s.host));
       row.appendChild(a);
     });
     markSourceResults();

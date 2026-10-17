@@ -8,6 +8,8 @@ const fs = require('fs');
 const { pathToFileURL } = require('url');
 const { buildSummary } = require('./summary');
 const { search, suggest } = require('./search');
+const { PageIndex } = require('./pageindex');
+const { SearchKeys } = require('./search-keys');
 const { reducedUserAgent } = require('./identity');
 const { Profiles, ENGINES, COLORS, DEFAULT_SETTINGS } = require('./profiles');
 const { setupPrivacy, hostOf, siteOf } = require('./privacy');
@@ -139,6 +141,9 @@ class ProfileContext {
     // Bookmarks and AI keys are shared with the parent profile; history is never written in private.
     this.library = privateOf ? privateOf.library : new Library(this.dataDir);
     this.ai = privateOf ? privateOf.ai : new AiStore(this.dataDir, safeStorage);
+    // Lantern Search: your own page index (never in private windows) and optional full-web keys.
+    this.pageIndex = privateOf ? null : new PageIndex(this.dataDir, core);
+    this.searchKeys = privateOf ? privateOf.searchKeys : new SearchKeys(this.dataDir, safeStorage);
     this.sessionFile = privateOf ? null : path.join(this.dataDir, 'session.json');
     this.searchesFile = privateOf ? null : path.join(this.dataDir, 'searches.json');
     this.recentSearches = privateOf ? [] : readJson(this.searchesFile, []).filter((x) => typeof x === 'string').slice(0, 30);
@@ -493,7 +498,7 @@ class WindowController {
     this.win.on('blur', () => { if (this.suggestItems && this.suggestItems.length) { this.hideSuggestions(); this.send('omnibox-done'); } }); // switched to another app
     this.win.on('focus', () => { ctx.applyTheme(); profiles.setLastUsed(ctx.id); refreshAppMenu(); });
     this.win.on('enter-full-screen', () => { this.send('fullscreen', true); this.layout(); });
-    this.win.on('leave-full-screen', () => { this.send('fullscreen', false); this.layout(); });
+    this.win.on('leave-full-screen', () => { this.exitHtmlFull(); this.send('fullscreen', false); this.layout(); });
     this.win.webContents.on('before-input-event', (e, input) => this.handleShortcut(e, input));
     this.win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     this.win.webContents.on('will-navigate', (e) => e.preventDefault());
@@ -542,6 +547,13 @@ class WindowController {
 
   send(channel, payload) { if (!this.win.isDestroyed()) this.win.webContents.send(channel, payload); }
 
+  // Leave a page's fullscreen (Esc, the green button, switching tabs) and give the frame back.
+  exitHtmlFull() {
+    const t = this.htmlFull && this.tabs.get(this.htmlFull);
+    this.htmlFull = null;
+    if (t && t.view && !t.view.webContents.isDestroyed()) t.view.webContents.executeJavaScript('document.fullscreenElement && document.exitFullscreen().catch(() => {})', true).catch(() => {});
+  }
+
   layout() {
     if (this.win.isDestroyed()) return;
     const [w, h] = this.win.getContentSize();
@@ -564,11 +576,18 @@ class WindowController {
     } else if (ids.length === 1) {
       panes.push({ id: ids[0], x: x0, y: top, width: cw, height: ch });
     }
+    if (this.htmlFull && !ids.includes(this.htmlFull)) this.exitHtmlFull();
+    const fullId = this.htmlFull && ids.includes(this.htmlFull) ? this.htmlFull : null;
+    if (fullId) {
+      for (const id of ids) { const t = this.tabs.get(id); if (t && t.view && id !== fullId) t.view.setBounds({ x: 0, y: 0, width: 0, height: 0 }); }
+      panes.length = 0;
+      panes.push({ id: fullId, x: 0, y: 0, width: w, height: h });
+    }
     if (!this.dragging) {
       for (const p of panes) { const t = this.tabs.get(p.id); if (t && t.view) t.view.setBounds({ x: p.x, y: p.y, width: p.width, height: p.height }); }
     }
     const px = m.sideRight ? w - m.side - pw : w - pw;
-    if (this.panel && this.panelOpen) this.panel.setBounds({ x: px, y: top, width: pw, height: ch });
+    if (this.panel && this.panelOpen) this.panel.setBounds(fullId ? { x: 0, y: 0, width: 0, height: 0 } : { x: px, y: top, width: pw, height: ch });
     if (!IS_MAC && this.win.setTitleBarOverlay) {
       const oh = m.vertical ? m.toolbar : m.strip;
       if (this._overlayH !== oh) { this._overlayH = oh; try { this.win.setTitleBarOverlay({ ...overlayColors(), height: oh }); } catch {} }
@@ -662,6 +681,19 @@ class WindowController {
     if (t.muted) wc.setAudioMuted(true);
     if (ctx.extensions) ctx.extensions.addTab(wc, this.win);
 
+    // A video (or any page) going fullscreen gets the whole screen: tabs, toolbar and side panel step aside.
+    wc.on('enter-html-full-screen', () => {
+      if (this.htmlFull !== t.id) this._fullBefore = this.win.isFullScreen();
+      this.htmlFull = t.id;
+      if (!this.win.isFullScreen()) this.win.setFullScreen(true);
+      this.layout();
+    });
+    wc.on('leave-html-full-screen', () => {
+      if (this.htmlFull !== t.id) return;
+      this.htmlFull = null;
+      if (!this._fullBefore && this.win.isFullScreen()) this.win.setFullScreen(false);
+      this.layout();
+    });
     wc.on('page-title-updated', (_e, title) => {
       t.title = title || t.url;
       if (!ctx.isPrivate && /^https?:/.test(t.url)) ctx.library.setTitle(t.url, title);
@@ -1435,7 +1467,7 @@ async function suggestionsFor(ctx, w, input, { remote = false, tabs = true } = {
     .forEach((q) => add({ type: 'recent', text: q }));
   const room = aiItem ? 7 : 8;
   if (remote && ctx.settings.searchSuggestions !== false && !looksLikeUrl(text)) {
-    for (const q of await suggest(text, { fetch: fetchImpl() })) {
+    for (const q of await suggest(text, { fetch: fetchImpl(), index: ctx.pageIndex })) {
       if (out.length >= room) break;
       add({ type: 'search', text: q });
     }
@@ -1523,6 +1555,7 @@ async function clearBrowsingData(ctx, what = { cookies: true, cache: true, histo
     if (ctx.sessionFile) { try { fs.rmSync(ctx.sessionFile, { force: true }); } catch {} }
     ctx.clearSearches();
     if (!ctx.isPrivate) ctx.library.clearHistory();
+    if (ctx.pageIndex) ctx.pageIndex.clear();
     for (const w of ctx.windows()) w.closed = [];
   }
   ctx.broadcast();
@@ -1918,16 +1951,41 @@ function fetchImpl(service = 'Lantern Search') {
   return USE_FIXTURES ? require('../test/fixture-fetch').fixtureFetch : serviceFetch(service);
 }
 
-handleInternal('lantern:search', (_ctx, _e, query, next, seen) => {
+function searchOpts(ctx) {
+  return { index: ctx.pageIndex, sources: ctx.settings.searchSources || {}, keys: ctx.searchKeys.all() };
+}
+handleInternal('lantern:search', (ctx, _e, query, next, seen) => {
   const q = String(query || '').trim().slice(0, 300);
   if (!q) throw new Error('empty query');
-  return search(q, { fetch: fetchImpl(), next: next && typeof next === 'object' ? next : null, seen: Array.isArray(seen) ? seen.slice(0, 200).map(String) : [] });
+  return search(q, { ...searchOpts(ctx), fetch: fetchImpl(), next: next && typeof next === 'object' ? next : null, seen: Array.isArray(seen) ? seen.slice(0, 200).map(String) : [] });
 });
-handleInternal('lantern:summary', (_ctx, event, query) => {
+handleInternal('lantern:search-state', (ctx) => ({
+  sources: ctx.settings.searchSources || {},
+  keys: ctx.searchKeys.state(),
+  index: { available: !!(ctx.pageIndex && ctx.pageIndex.available), pages: ctx.pageIndex ? ctx.pageIndex.count() : 0, on: ctx.settings.indexPages !== false },
+}));
+handleInternal('lantern:search-key', async (ctx, _e, id, key) => {
+  const k = String(key || '').trim();
+  if (!/^[\w.-]{8,200}$/.test(k)) throw new Error('That doesn’t look like an API key. Copy the whole key from the provider’s dashboard.');
+  // Check the key with one real search before keeping it.
+  const { fetchers } = require('./search');
+  if (!fetchers[id]) throw new Error('Unknown search source');
+  try { await fetchers[id]('lantern', { fetch: fetchImpl(), page: 1, keys: { [id]: k } }); } catch (err) {
+    throw new Error(/HTTP 40[13]/.test(String(err.message)) ? 'The provider rejected that key. Check it was copied completely and is active.' : `Couldn’t check the key: ${err.message}`);
+  }
+  ctx.searchKeys.set(id, k);
+  return ctx.searchKeys.state();
+});
+handleInternal('lantern:search-key-remove', (ctx, _e, id) => { ctx.searchKeys.remove(String(id)); return ctx.searchKeys.state(); });
+handleInternal('lantern:qr', (_ctx, _e, text) => core.qr(String(text || '').slice(0, 2000), '#111318', '#ffffff').svg);
+handleInternal('lantern:clean-url', (_ctx, _e, url) => core.cleanUrl(String(url || '').slice(0, 4000)));
+handleInternal('lantern:search-index-clear', (ctx) => { if (ctx.pageIndex) ctx.pageIndex.clear(); return true; });
+handleInternal('lantern:summary', (ctx, event, query) => {
   const q = String(query || '').trim().slice(0, 300);
   if (!q) throw new Error('empty query');
   return buildSummary(q, {
     fetch: fetchImpl(),
+    searchOpts: searchOpts(ctx),
     onProgress: (step) => { if (!event.sender.isDestroyed()) event.sender.send('lantern:progress', step); },
   });
 });
@@ -2360,6 +2418,18 @@ handleInternal('lantern:safety-status', async (ctx, _e, refresh) => {
 handleInternal('lantern:dismiss-restore', (ctx) => { ctx.crashed = false; return true; });
 
 // ---------- fingerprint protection: the seed a tab's page gets (sync, before page scripts run) ----------
+// The visible text of a page you opened, for Lantern Search's local index. Only from normal
+// (not private) windows, only when history and page indexing are on, and never for sign-in,
+// mail, banking or pages with a password box (the tab checks for those before sending).
+ipcMain.on('lantern:page-text', (event, payload) => {
+  try {
+    const ctx = [...contexts.values()].find((c) => c.session === event.sender.session);
+    if (!ctx || ctx.isPrivate || !ctx.pageIndex || ctx.settings.indexPages === false || ctx.settings.saveHistory === false) return;
+    if (event.senderFrame && event.senderFrame !== event.sender.mainFrame) return;
+    const url = event.sender.getURL();
+    ctx.pageIndex.add({ url, title: event.sender.getTitle(), text: String((payload && payload.text) || '') });
+  } catch {}
+});
 ipcMain.on('lantern:fp', (event, url) => {
   try {
     const found = findTabByWebContentsId(event.sender.id, true);

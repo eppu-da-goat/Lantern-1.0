@@ -1,5 +1,5 @@
 'use strict';
-// End-to-end test of Lantern 1.6 in a real Electron window (development only).
+// End-to-end test of Lantern 1.7 in a real Electron window (development only).
 // Run: LANTERN_TEST_SHOT=/tmp/shots LANTERN_AI_MOCK=1 LANTERN_NO_EXT=1 LANTERN_TEST_SCRIPT=test/e2e.js electron .
 const fs = require('fs');
 const path = require('path');
@@ -46,7 +46,7 @@ module.exports = async function run(t) {
   const panelJs = (code) => w.panel.webContents.executeJavaScript(code);
 
   // ---- Rust core is loaded ----
-  check('rust core loads', /^1\.6\./.test(core.version()), core.version());
+  check('rust core loads', /^1\.7\./.test(core.version()), core.version());
 
   // ---- history ----
   await load(`${base}/article.html`);
@@ -232,6 +232,64 @@ module.exports = async function run(t) {
   w.activeWc().loadURL(`lantern://app/search.html?q=${encodeURIComponent('lanterns')}`);
   await wait(1500);
   await shoot('search-page');
+
+  // ---- 1.7: Lantern Search, our own engine (fixtures stand in for the sources) ----
+  if (process.env.LANTERN_FIXTURES) {
+    process.env.LANTERN_FIXTURE_BASE = base;
+    process.env.LANTERN_INDEX_LOCAL = '1'; // the test server is on 127.0.0.1, which real browsing never indexes
+    ctx.settings.indexPages = true; ctx.settings.saveHistory = true;
+    await load(`${base}/article`);
+    const indexed = await until(() => ctx.pageIndex.count() >= 1, 8000);
+    check('visited page is added to the local index', indexed, String(ctx.pageIndex.count()));
+    const local = ctx.pageIndex.search('chimney wick');
+    check('local index finds it by its words', local.length && /article/.test(local[0].url), JSON.stringify(local.map((r) => r.url)));
+    await load(`${base}/login-form`);
+    await w.activeWc().executeJavaScript(`document.body.innerHTML = '<h1>Sign in</h1><input type=password>' + 'x '.repeat(300)`);
+    check('sign-in pages are never indexed', !require('../src/pageindex').PageIndex.allowed(`${base}/login`) && ctx.pageIndex.count() === 1);
+    await load('lantern://app/search.html?q=' + encodeURIComponent('lantern chimney'));
+    const ok = await until(() => w.activeWc().executeJavaScript(`document.querySelectorAll('#results .result a').length >= 4`), 8000);
+    check('Lantern Search shows merged results', ok);
+    const info = await w.activeWc().executeJavaScript(`({ first: [...document.querySelectorAll('#results .result')].slice(0, 6).map((li) => li.querySelector('.t').textContent + ' [' + [...li.querySelectorAll('.from')].map((f) => f.textContent).join(',') + ']'), panel: document.getElementById('panel-title').textContent, line: document.getElementById('sources-line').textContent })`);
+    log('search results', info);
+    check('a page found by several sources ranks first', /How lanterns work/.test(info.first[0]) && /Visited/.test(info.first[0]), info.first[0]);
+    check('knowledge panel from Wikipedia', info.panel === 'Lantern', info.panel);
+    check('sources line names every source', /Your pages/.test(info.line) && /Wikipedia/.test(info.line) && /Mwmbl/.test(info.line) && /Marginalia/.test(info.line), info.line);
+    const fx = require('./fixture-fetch');
+    check('nothing went to DuckDuckGo', !fx.calls.some((c) => /duckduckgo/.test(c)) && !t.serviceLog.some((r) => /duckduckgo/.test(r.host)));
+    await shoot('lantern-search');
+    const ans = await (async () => { await load('lantern://app/search.html?q=' + encodeURIComponent('5 ft in cm')); return w.activeWc().executeJavaScript(`document.getElementById('answer').textContent`); })();
+    check('instant answer on the results page', /152\.4 cm/.test(ans), ans);
+    ctx.pageIndex.clear();
+  }
+
+  // ---- 1.7: desk on the new tab ----
+  await load('lantern://app/newtab.html');
+  await wait(600);
+  const desk = await w.activeWc().executeJavaScript(`({ widgets: document.querySelectorAll('#desk .w:not([hidden])').length })`);
+  check('desk shows its widgets', desk.widgets === 7, JSON.stringify(desk));
+  const inst = await w.activeWc().executeJavaScript(`(() => { const q = document.getElementById('q'); q.value = '18% of 2400'; q.dispatchEvent(new Event('input')); const b = document.getElementById('instant'); return b.hidden ? '' : b.textContent; })()`);
+  check('instant answer under the new tab search box', /432/.test(inst), inst);
+  await w.activeWc().executeJavaScript(`document.getElementById('q').value=''; document.getElementById('q').dispatchEvent(new Event('input')); document.getElementById('q').blur(); document.body.focus(); document.dispatchEvent(new KeyboardEvent('keydown', { key: '?' }))`);
+  check('? opens the keyboard shortcuts', await w.activeWc().executeJavaScript(`!document.getElementById('keys-sheet').hidden && document.querySelectorAll('#keys-list .k').length > 8`));
+  await w.activeWc().executeJavaScript(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))`);
+  const qrOk = await w.activeWc().executeJavaScript(`(async () => { document.querySelector('[data-tool="qr"]').click(); const i = document.getElementById('qr-in'); i.value = 'https://example.com'; i.dispatchEvent(new Event('input')); await new Promise((r) => setTimeout(r, 500)); return !!document.querySelector('#qr-out svg'); })()`);
+  check('toolbox QR code from the Rust core', qrOk);
+  const clean = await w.activeWc().executeJavaScript(`(async () => { document.querySelector('[data-tool="clean"]').click(); const i = document.getElementById('cl-in'); i.value = 'https://example.com/a?utm_source=x&id=7&fbclid=1'; i.dispatchEvent(new Event('input')); await new Promise((r) => setTimeout(r, 300)); return document.getElementById('cl-out').textContent; })()`);
+  check('toolbox cleans links', clean === 'https://example.com/a?id=7', clean);
+  await w.activeWc().executeJavaScript(`window.scrollTo(0, 700)`);
+  await wait(400);
+  await shoot('desk');
+  await w.activeWc().executeJavaScript(`window.scrollTo(0, 0)`);
+
+  // ---- 1.7: a page going fullscreen covers the tabs and toolbar ----
+  await load(`${base}/video`);
+  await w.activeWc().executeJavaScript(`document.documentElement.requestFullscreen()`, true).catch(() => {});
+  const full = await until(() => { const b = w.tabs.get(w.activeId).view.getBounds(); const [cw, ch] = w.win.getContentSize(); return b.y === 0 && b.x === 0 && w.win.isFullScreen() && b.width >= cw && b.height >= ch; }, 5000);
+  check('fullscreen video covers the whole window', full, JSON.stringify([w.tabs.get(w.activeId).view.getBounds(), w.win.getContentSize(), w.win.isFullScreen()]));
+  await w.activeWc().executeJavaScript(`document.exitFullscreen()`, true).catch(() => {});
+  const unfull = await until(() => w.tabs.get(w.activeId).view.getBounds().y === w.uiHeight(), 5000);
+  check('leaving fullscreen brings the toolbar back', unfull, JSON.stringify(w.tabs.get(w.activeId).view.getBounds()));
+  await wait(800);
 
   // ---- private window ----
   const pw = await openPrivateWindow(ctx);

@@ -160,7 +160,9 @@
   }
 
   // ----- shortcuts -----
-  const favicon = (url) => { try { return `https://icons.duckduckgo.com/ip3/${new URL(url).hostname}.ico`; } catch { return ''; } };
+  // A coloured letter for each shortcut, so no icon service learns which sites you keep here.
+  const hue = (t) => { let n = 0; for (const c of String(t)) n = (n * 31 + c.charCodeAt(0)) >>> 0; return n % 360; };
+  const hostName = (url) => { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return url; } };
   function renderShortcuts() {
     const nav = $('shortcuts');
     nav.replaceChildren();
@@ -169,11 +171,8 @@
       const a = el('a', 'tile');
       a.href = sc.url;
       const ic = el('span', 'ic');
-      const img = el('img');
-      img.alt = '';
-      img.src = favicon(sc.url);
-      img.onerror = () => { ic.replaceChildren(el('b', '', (sc.title || '?').charAt(0).toUpperCase())); };
-      ic.appendChild(img);
+      ic.appendChild(el('b', 'mono', (sc.title || hostName(sc.url) || '?').charAt(0).toUpperCase()));
+      ic.style.background = `hsl(${hue(hostName(sc.url))} 52% 44%)`;
       const edit = el('button', 'edit');
       edit.type = 'button';
       edit.setAttribute('aria-label', `Edit ${sc.title}`);

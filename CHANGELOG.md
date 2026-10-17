@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.7.0 (2026-10-17)
+
+**Lantern Search is now Lantern's own search engine.** No search goes to DuckDuckGo any more.
+- **Your own page index**: the text of pages you visit is kept in a full-text index on your computer (SQLite FTS5), so Lantern Search finds pages you've read before. Never in private windows, never pages with a password box, sign-in, mail or banking pages. Clearing history clears it, and you can pause or clear it in Settings.
+- **Independent sources**: Wikipedia (in the language you type in: Malayalam, Hindi, Tamil and more), Mwmbl's open community index and Marginalia's index of the small web are asked at the same time. Add your own Brave Search API or Mojeek key for full-web results.
+- **Lantern's own ranking**, written in Rust: the same page found by several sources counts once and rises, your words are matched against titles, snippets and site names, a search for a site's name puts the site first, and no single site fills the top.
+- Each result shows where it came from (Visited, Wikipedia, Mwmbl…), and the page says which sources answered.
+- Knowledge panel from Wikipedia, and search suggestions from your own pages and Wikipedia's titles.
+- Images, News, Videos and Maps go to Openverse, Google News, YouTube and OpenStreetMap.
+- Site letters replace third-party icons on results and shortcuts, so no icon service learns what you search or keep.
+- DuckDuckGo is removed from the engine list and the bang list (`!mw` Mwmbl, `!mg` Marginalia and `!ov` Openverse are new); anyone who had it set moves to Lantern Search.
+
+**New Tab: your desk**
+- Focus timer with session count and focus sounds (rain, deep hum, waves) made live on the page.
+- Tasks, sticky notes, world clocks, a calendar with week numbers and Indian holidays, and countdowns.
+- Toolbox: clean a link (with Lantern's Rust cleaner), password maker, QR codes (from the Rust core) and a word counter.
+- Instant answers under the search box and on Lantern Search: sums, percentages, units, lakh and crore, time in a city, days until a date, colour codes.
+- Keyboard shortcuts: `?` lists them, `1`–`9` open your shortcuts, `T` task, `N` note, `F` timer, `L` link, `P` password, `Q` QR, `S` sounds.
+- Every widget can be turned off in Customize Lantern.
+
+**Fixes**
+- A video (or any page) that goes fullscreen now covers the whole screen. The tab strip and toolbar used to stay on top of it.
+
 ## 1.6.0 (2026-10-16)
 
 Ideas from Helium and Brave, written fresh for Lantern.

@@ -67,7 +67,7 @@ Your profiles, history, bookmarks and keys are kept when you update.
 
 ## Privacy
 
-- **No Lantern server.** Searches go to DuckDuckGo's index without cookies, and AI questions go straight from your computer to the service you picked.
+- **No Lantern server.** Lantern Search ranks results from your own page index (on your computer), Wikipedia, Mwmbl and Marginalia itself, without cookies. AI questions go straight from your computer to the service you picked.
 - **Keys stay yours.** API keys are encrypted with the system keychain (Keychain on macOS, DPAPI on Windows), stored only in your profile and only ever sent to the service they belong to. Pages never see them, only a masked preview.
 - **Page text only when you choose.** When *This page* is on in the AI panel, the page's text is sent with your question. Turn it off to stop that.
 - History, bookmarks and recent searches stay on your device. Private windows keep none of them.

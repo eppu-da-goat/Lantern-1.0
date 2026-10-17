@@ -177,10 +177,10 @@ async function fetchPage(fetchImpl, url) {
  * @param {string} query
  * @param {{ fetch: typeof fetch, onProgress?: (step: string) => void }} opts
  */
-async function buildSummary(query, { fetch: fetchImpl, onProgress = () => {} }) {
+async function buildSummary(query, { fetch: fetchImpl, onProgress = () => {}, searchOpts = {} }) {
   const started = Date.now();
   onProgress('Searching');
-  const [serp, instant] = await Promise.all([getSerp(fetchImpl, query), getInstant(fetchImpl, query)]);
+  const [serp, instant] = await Promise.all([getSerp(fetchImpl, query, searchOpts), getInstant(fetchImpl, query, searchOpts)]);
   const results = serp.results;
   const candidates = results.filter((r) => !SKIP_HOSTS.test(r.host) && !/\.pdf($|\?)/i.test(r.url));
 

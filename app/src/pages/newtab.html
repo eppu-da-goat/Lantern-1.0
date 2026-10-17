@@ -7,6 +7,7 @@
 <title>New Tab</title>
 <link rel="stylesheet" href="assets/lantern.css">
 <link rel="stylesheet" href="assets/newtab.css">
+<link rel="stylesheet" href="assets/desk.css">
 </head>
 <body>
   <div class="glow" aria-hidden="true"></div>
@@ -47,6 +48,9 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
       </a>
     </section>
+
+    <!-- Your desk: focus timer, tasks, notes, clocks, calendar, countdowns, toolbox (desk.js). -->
+    <section id="desk" class="desk" aria-label="Your desk"></section>
 
     <!-- Pinned statement: words light up as you scroll through it. -->
     <section id="story" class="pin">
@@ -142,7 +146,9 @@
   <div id="scrim" class="scrim" hidden></div>
   <script src="assets/theme.js"></script>
   <script src="assets/suggest.js"></script>
+  <script src="assets/answers.js"></script>
   <script src="assets/newtab.js"></script>
+  <script src="assets/desk.js"></script>
   <script src="assets/toplinks.js"></script>
 </body>
 </html>

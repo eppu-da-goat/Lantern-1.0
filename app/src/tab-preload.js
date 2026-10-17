@@ -75,6 +75,13 @@ if (location.protocol === 'lantern:' && location.host === 'app') {
     openApp: call('lantern:app-open'),
     removeApp: call('lantern:app-remove'),
     resetShields: call('lantern:shields-reset'),
+    // 1.7: Lantern Search
+    searchState: call('lantern:search-state'),
+    searchKey: call('lantern:search-key'),
+    searchKeyRemove: call('lantern:search-key-remove'),
+    searchIndexClear: call('lantern:search-index-clear'),
+    qr: call('lantern:qr'),
+    cleanUrl: call('lantern:clean-url'),
   });
 }
 
@@ -206,4 +213,21 @@ if ((location.protocol === 'https:' || location.protocol === 'http:') && context
       });
     } catch {}
   }
+}
+
+// Lantern Search's local index: after a normal page finishes loading, its visible text goes to
+// Lantern (on this computer only) so you can find it again later. Lantern decides whether to keep
+// it (never for private windows, or with history or indexing turned off); pages with a password
+// box are never sent at all.
+if ((location.protocol === 'https:' || location.protocol === 'http:') && process.isMainFrame) {
+  const sendText = () => {
+    try {
+      if (document.querySelector('input[type="password"]')) return;
+      const body = document.body;
+      if (!body) return;
+      const text = (body.innerText || '').slice(0, 20000);
+      if (text.length > 200) ipcRenderer.send('lantern:page-text', { text });
+    } catch {}
+  };
+  window.addEventListener('load', () => setTimeout(sendText, 2500), { once: true });
 }

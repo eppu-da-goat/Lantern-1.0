@@ -95,6 +95,18 @@ fn site_shields(v: &Value) -> Result<Value, String> {
     Ok(Value::Object(out))
 }
 
+/// Which sources Lantern Search asks: an object of on/off switches for the known sources.
+fn search_sources(v: &Value) -> Result<Value, String> {
+    const KNOWN: &[&str] = &["local", "wikipedia", "mwmbl", "marginalia", "brave", "mojeek"];
+    let o = v.as_object().ok_or("expected an object of on/off switches")?;
+    let mut out = serde_json::Map::new();
+    for (k, val) in o {
+        if !KNOWN.contains(&k.as_str()) { return Err(format!("unknown search source \"{k}\"")); }
+        out.insert(k.clone(), json!(val.as_bool().ok_or("expected true or false")?));
+    }
+    Ok(Value::Object(out))
+}
+
 /// Checks one setting. Returns `{ok: true, value}` with the cleaned value, or `{ok: false, message}`.
 pub fn validate(key: &str, v: &Value) -> Value {
     let r: Result<Value, String> = match key {
@@ -102,7 +114,7 @@ pub fn validate(key: &str, v: &Value) -> Value {
         | "safeBrowsing" | "downloadWarnings" | "showHomeButton" | "showShortcuts" | "toolbarSummary" | "toolbarShield"
         | "downloadsAsk" | "searchSuggestions" | "rememberSearches" | "bookmarksBar" | "showAiButton" | "saveHistory"
         | "aiIncludePage" | "inlineAutocomplete" | "showMailLink" | "bangs" | "tabsCollapsed" | "compactMode" | "mruTabSwitching"
-        | "showSplitButton" | "stripTracking" | "hideAdElements" => boolean(v),
+        | "showSplitButton" | "stripTracking" | "hideAdElements" | "indexPages" => boolean(v),
         "customBangs" => crate::bangs::validate_custom(v),
         "tabLayout" => one_of(v, &["horizontal", "vertical"]),
         "tabSide" => one_of(v, &["left", "right"]),
@@ -113,7 +125,8 @@ pub fn validate(key: &str, v: &Value) -> Value {
         },
         "fingerprinting" => one_of(v, &["off", "standard", "strict"]),
         "siteShields" => site_shields(v),
-        "searchEngine" => one_of(v, &["lantern", "duckduckgo", "brave", "startpage", "ecosia", "google", "bing"]),
+        "searchEngine" => one_of(v, &["lantern", "mojeek", "brave", "startpage", "ecosia", "google", "bing"]),
+        "searchSources" => search_sources(v),
         "camera" | "microphone" | "notifications" | "location" => one_of(v, &["ask", "block"]),
         "theme" => one_of(v, &["system", "light", "dark"]),
         "themeColor" => one_of(v, THEME_COLORS),
@@ -157,7 +170,7 @@ pub fn keys() -> Value {
         "searchEngine", "camera", "microphone", "notifications", "location", "theme", "themeColor", "customAccent", "ntpBackground",
         "shortcuts", "defaultZoom", "startup", "startupUrl", "mailService", "mailUrl",
         "bangs", "customBangs", "tabLayout", "tabSide", "tabsCollapsed", "tabsWidth", "compactMode", "mruTabSwitching", "showSplitButton",
-        "fingerprinting", "siteShields", "stripTracking", "hideAdElements"
+        "fingerprinting", "siteShields", "stripTracking", "hideAdElements", "indexPages", "searchSources"
     ])
 }
 
@@ -186,6 +199,9 @@ mod tests {
         assert_eq!(validate("fingerprinting", &json!("max"))["ok"], false);
         assert_eq!(validate("siteShields", &json!({ "Example.com": { "off": true, "x": 1 } }))["value"], json!({ "example.com": { "off": true } }));
         assert_eq!(validate("siteShields", &json!({ "bad site": { "off": true } }))["ok"], false);
+        assert_eq!(validate("searchEngine", &json!("duckduckgo"))["ok"], false);
+        assert_eq!(validate("searchSources", &json!({ "mwmbl": false, "local": true }))["ok"], true);
+        assert_eq!(validate("searchSources", &json!({ "ddg": true }))["ok"], false);
         assert_eq!(validate("customBangs", &json!([{ "trigger": "jira", "url": "https://jira.example.com/browse/{q}" }]))["ok"], true);
     }
 }
